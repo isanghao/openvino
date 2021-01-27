@@ -97,13 +97,13 @@ TEST(scatter_elements_update_gpu_fp16, d2411_axisF) {
     auto output_ptr = output.pointer<uint16_t>();
 
     std::vector<float> expected_results = {
-        3.f, 6.f, 5.f, 4.f, 
-        1.f, 7.f, 2.f, 9.f
+        10.f, 11.f, 5.f, 4.f, 
+        1.f, 7.f, 12.f, 13.f
     };
 
     for (size_t i = 0; i < expected_results.size(); ++i) {
         EXPECT_EQ(expected_results[i], float16_to_float32(output_ptr[i]));
-    }    
+    }
 }
 
 

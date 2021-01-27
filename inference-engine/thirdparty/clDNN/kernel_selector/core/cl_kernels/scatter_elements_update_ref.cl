@@ -25,7 +25,23 @@
     #define ORDER b,f,w,z,y,x
 #endif
 
-KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* dictionary,
+#if OUTPUT_DIMS == 4
+    #if AXIS_VALUE == 0
+    #define OUTPUT_UPDATE_ORDER index,f,y,x
+    #elif AXIS_VALUE == 1
+    #define OUTPUT_UPDATE_ORDER b,index,y,x
+    #elif AXIS_VALUE == 2
+    #define OUTPUT_UPDATE_ORDER b,f,index,x
+    #elif AXIS_VALUE == 3
+    #define OUTPUT_UPDATE_ORDER b,f,y,index
+    #else
+    #error fail
+    #endif
+#else
+    #error fail
+#endif
+
+KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* data,
                    const __global INPUT1_TYPE* indices,
                    const __global INPUT2_TYPE* updates, 
                    __global OUTPUT_TYPE* output
@@ -58,9 +74,10 @@ KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* dictionary,
         const uint f = dim2 % OUTPUT_FEATURE_NUM;
         const uint b = dim2 / OUTPUT_FEATURE_NUM;
     #endif
-    
+
     const uint output_idx = GET_OUTPUT_INDEX(ORDER);
-    INPUT0_TYPE val = dictionary[output_idx];
+    printf("%d, %d, %d, %d, OUTPUT_DIMS %d, output_idx %d, update_idx %d\n", x, y, f, b, OUTPUT_DIMS, output_idx, GET_UPDATES_INDEX(INPUT2, UPDATES_INDEX_ORDER));
+    INPUT0_TYPE val = data[output_idx];
     #if HAS_FUSED_OPS
         FUSED_OPS_FIRST_KERNEL;
         output[output_idx] = TO_OUTPUT_TYPE(FUSED_OPS_RESULT_FIRST_KERNEL);
@@ -72,14 +89,10 @@ KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* dictionary,
     #if OUTPUT_DIMS == 4
         const uint x = dim0;
         const uint y = dim1;
-        #if AXIS_VALUE == 0
-            const uint f = dim2 % OUTPUT_FEATURE_NUM;
-            const uint b = dim2 / OUTPUT_FEATURE_NUM;
-        #else
-            const uint f = dim2 / OUTPUT_BATCH_NUM;
-            const uint b = dim2 % OUTPUT_BATCH_NUM;
-        #endif
+        const uint f = dim2 % INPUT2_FEATURE_NUM;
+        const uint b = dim2 / INPUT2_FEATURE_NUM;
     #elif OUTPUT_DIMS == 5
+#error "Not ready"
         const uint z = dim1;
         #if AXIS_VALUE == 1
             const uint f = dim2 / OUTPUT_BATCH_NUM;
@@ -98,6 +111,7 @@ KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* dictionary,
             const uint y = dim0 / OUTPUT_SIZE_X;
         #endif
     #elif OUTPUT_DIMS == 6
+#error "Not ready"
         #if AXIS_VALUE == 1
             const uint f = dim2 / OUTPUT_BATCH_NUM;
             const uint b = dim2 % OUTPUT_BATCH_NUM;
@@ -129,15 +143,18 @@ KERNEL(scatter_elements_update_ref)(const __global INPUT0_TYPE* dictionary,
         #endif
     #endif
 
-    const uint output_idx = GET_OUTPUT_INDEX(SECOND_ITER_OUTPUT_INDEX_ORDER);
     const uint updates_idx = GET_UPDATES_INDEX(INPUT2, UPDATES_INDEX_ORDER);
+    INPUT1_TYPE index = indices[(int)updates_idx];
 
-    INPUT2_TYPE val = updates[updates_idx];
+    const uint output_idx = GET_OUTPUT_INDEX(OUTPUT_UPDATE_ORDER);
+
+    INPUT2_TYPE val = updates[(int)updates_idx];
+    printf("%d, %d, %d, %d, OUTPUT_DIMS %d, output_idx %d, update_idx %d, index %d, val %d\n", x, y, f, b, OUTPUT_DIMS, output_idx, (int)updates_idx, (int)index, (int)val);
     #if HAS_FUSED_OPS
         FUSED_OPS_SECOND_KERNEL;
-        output[output_idx] = 0; //TO_OUTPUT_TYPE(FUSED_OPS_RESULT_SECOND_KERNEL);
+        output[output_idx] = TO_OUTPUT_TYPE(FUSED_OPS_RESULT_SECOND_KERNEL);
     #else
-        output[output_idx] = 2; //ACTIVATION(val, ACTIVATION_PARAMS);
+        output[output_idx] = ACTIVATION(val, ACTIVATION_PARAMS);
     #endif
 #endif
 }
