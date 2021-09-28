@@ -422,10 +422,18 @@ void program::build_program(bool is_internal) {
     init_graph();
     { pre_optimize_graph(is_internal); }
     run_graph_compilation();
-    { post_optimize_graph(is_internal); }
-    prepare_memory_dependencies();
-    compile();
-    init_kernels();
+
+    GPU_DEBUG_GET_INSTANCE(debug_config);
+#ifdef GPU_DEBUG_CONFIG
+    if (debug_config->dry_run.empty()) {
+#else
+    {
+#endif
+        { post_optimize_graph(is_internal); }
+        prepare_memory_dependencies();
+        compile();
+        init_kernels();
+    }
 
     if (!is_internal) {
         prim_info = get_current_stage_info();
