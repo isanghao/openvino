@@ -331,7 +331,7 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
 
         // Remove Reorder to support mixed format convolutions of bsv32fsv16 or bsv32fsv32 output
         if (next.is_type<convolution>() && (prev.is_type<eltwise>() || prev.is_type<quantize>()) &&
-            (fmt_prev == format::bfyx || fmt_prev == format::bs_fs_yx_bsv4_fsv2) &&
+            (fmt_prev == format::bfyx || fmt_prev == format::bs_fs_yx_bsv4_fsv2 || fmt_prev == format::bs_fs_yx_bsv8_fsv4) &&
             ((fmt_next == format::bs_fs_yx_bsv32_fsv32 && (prev_output_layout.size.feature[0] == 3 || prev_output_layout.size.feature[0] == 4)) ||
             (fmt_next == format::bs_fs_yx_bsv32_fsv16 && (prev_output_layout.size.feature[0] == 3 || prev_output_layout.size.feature[0] == 4))))
             return true;
@@ -1510,11 +1510,11 @@ format layout_optimizer::get_preferred_format(program_node& node) {
         if (layout.format.spatial_num() == 2 &&
             (layout.data_type == data_types::i8 || layout.data_type == data_types::u8) &&
             layout.size.batch[0] % 16 == 0) {
-            if (use_onednn_impls && layout.size.batch[0] % 32 == 0) {
+            if (use_onednn_impls && layout.size.batch[0] >= 16) {
                 if (node.get_users().size() == 1 && node.get_users().front()->is_type<convolution>()) {
                     auto& conv = node.get_users().front()->as<convolution>();
                     auto ws = conv.get_dependency(1).get_output_layout().size;
-                    if (data_type_traits::is_floating_point(conv.get_output_layout().data_type) || ws.spatial[0] != 7 || conv.get_primitive()->groups > 1)
+                    if (ws.spatial[0] != 7 || conv.get_primitive()->groups > 1)
                         expected = format::bfyx;
                     else
                         expected = format::bs_fs_yx_bsv8_fsv4;

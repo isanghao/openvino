@@ -587,7 +587,7 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
             auto old_layout = prev_node->get_output_layout();
             if (conv_node.get_output_layout().format == format::bs_fs_yx_bsv32_fsv16
                     && (old_layout.data_type == data_types::i8 || old_layout.data_type == data_types::u8)
-                    && conv_node.get_users().size() == 1) {
+                    && (old_layout.format == format::bs_fs_yx_bsv32_fsv16)) {
                 auto new_layout = old_layout;
                 new_layout.format = format::bs_fs_yx_bsv32_fsv32;
                 auto new_input = rf.get_reorder(prev_node->id(),
