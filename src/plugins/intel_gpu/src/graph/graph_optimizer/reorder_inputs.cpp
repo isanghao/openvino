@@ -576,20 +576,28 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
                 }
             }
         }
-        {
+
+        std::vector<format> wrong_format = {format::b_fs_yx_fsv16, format::bs_fs_yx_bsv32_fsv16};
+        std::vector<format> correct_format = {format::b_fs_yx_fsv32, format::bs_fs_yx_bsv32_fsv32};
+        for (int i = 0; i < wrong_format.size(); i++) {
             // reorder for onednn mixed-precision conv
             // If the layouts are like below, change input layout to fsv32.
             // From:
             //   (bsv32_fsv16.u8) --> conv --> (bsv32_fsv16.fp16)
             // To:
             //   (bsv32_fsv16.u8) --> reorder --> (bsv32_fsv32.u8) --> conv --> (bsv32_fsv16.fp16)
+            //
+            // Do not apply such change for b=1 first conv
+
             auto prev_node = conv_node.get_dependencies().front();
             auto old_layout = prev_node->get_output_layout();
-            if (conv_node.get_output_layout().format == format::bs_fs_yx_bsv32_fsv16
+            auto conv_layout = conv_node.get_output_layout();
+            if (conv_layout.format == wrong_format[i]
                     && (old_layout.data_type == data_types::i8 || old_layout.data_type == data_types::u8)
-                    && (old_layout.format == format::bs_fs_yx_bsv32_fsv16)) {
+                    && (old_layout.format == wrong_format[i])
+                    && !(old_layout.size.batch[0] == 1 && old_layout.size.feature[0] <= 4)) {
                 auto new_layout = old_layout;
-                new_layout.format = format::bs_fs_yx_bsv32_fsv32;
+                new_layout.format = correct_format[i];
                 auto new_input = rf.get_reorder(prev_node->id(),
                                                 old_layout,
                                                 new_layout);
