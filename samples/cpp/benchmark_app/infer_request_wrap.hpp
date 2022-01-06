@@ -11,14 +11,14 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <openvino/openvino.hpp>
 #include <queue>
 #include <string>
 #include <vector>
 
 // clang-format off
+#include "inference_engine.hpp"
 
-#include "remote_tensors_filling.hpp"
+#include "remote_blobs_filling.hpp"
 #include "statistics_report.hpp"
 #include "utils.hpp"
 // clang-format on
@@ -33,14 +33,13 @@ public:
 
     ~InferReqWrap() = default;
 
-    explicit InferReqWrap(ov::runtime::CompiledModel& model, size_t id, QueueCallbackFunction callbackQueue)
-        : _request(model.create_infer_request()),
+    explicit InferReqWrap(InferenceEngine::ExecutableNetwork& net, size_t id, QueueCallbackFunction callbackQueue)
+        : _request(net.CreateInferRequest()),
           _id(id),
           _lat_group_id(0),
           _callbackQueue(callbackQueue),
           outputClBuffer() {
-        _request.set_callback([&](const std::exception_ptr& ptr) {
-            // TODO: Add exception ptr rethrow in proper thread
+        _request.SetCompletionCallback([&]() {
             _endTime = Time::now();
             _callbackQueue(_id, _lat_group_id, getExecutionTimeInMilliseconds());
         });
@@ -48,35 +47,30 @@ public:
 
     void startAsync() {
         _startTime = Time::now();
-        _request.start_async();
+        _request.StartAsync();
     }
 
     void wait() {
-        _request.wait();
+        _request.Wait(InferenceEngine::InferRequest::RESULT_READY);
     }
 
     void infer() {
         _startTime = Time::now();
-        _request.infer();
+        _request.Infer();
         _endTime = Time::now();
         _callbackQueue(_id, _lat_group_id, getExecutionTimeInMilliseconds());
     }
 
-    std::vector<ov::runtime::ProfilingInfo> getPerformanceCounts() {
-        return _request.get_profiling_info();
+    std::map<std::string, InferenceEngine::InferenceEngineProfileInfo> getPerformanceCounts() {
+        return _request.GetPerformanceCounts();
     }
 
-    void setShape(const std::string& name, const ov::Shape& dims) {
-        // TODO check return status
-        _request.get_tensor(name).set_shape(dims);
+    InferenceEngine::Blob::Ptr getBlob(const std::string& name) {
+        return _request.GetBlob(name);
     }
 
-    ov::runtime::Tensor getTensor(const std::string& name) {
-        return _request.get_tensor(name);
-    }
-
-    void setTensor(const std::string& name, const ov::runtime::Tensor& data) {
-        _request.set_tensor(name, data);
+    void setBlob(const std::string& name, const InferenceEngine::Blob::Ptr& data) {
+        _request.SetBlob(name, data);
     }
 
     double getExecutionTimeInMilliseconds() const {
@@ -96,7 +90,7 @@ public:
     }
 
 private:
-    ov::runtime::InferRequest _request;
+    InferenceEngine::InferRequest _request;
     Time::time_point _startTime;
     Time::time_point _endTime;
     size_t _id;
@@ -107,10 +101,13 @@ private:
 
 class InferRequestsQueue final {
 public:
-    InferRequestsQueue(ov::runtime::CompiledModel& model, size_t nireq, size_t lat_group_n, bool enable_lat_groups)
+    InferRequestsQueue(InferenceEngine::ExecutableNetwork& net,
+                       size_t nireq,
+                       size_t lat_group_n,
+                       bool enable_lat_groups)
         : enable_lat_groups(enable_lat_groups) {
         for (size_t id = 0; id < nireq; id++) {
-            requests.push_back(std::make_shared<InferReqWrap>(model,
+            requests.push_back(std::make_shared<InferReqWrap>(net,
                                                               id,
                                                               std::bind(&InferRequestsQueue::putIdleRequest,
                                                                         this,

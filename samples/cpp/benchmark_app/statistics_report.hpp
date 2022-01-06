@@ -10,6 +10,8 @@
 #include <vector>
 
 // clang-format off
+#include "inference_engine.hpp"
+
 #include "samples/common.hpp"
 #include "samples/csv_dumper.hpp"
 #include "samples/slog.hpp"
@@ -72,7 +74,7 @@ private:
 /// @brief Responsible for collecting of statistics and dumping to .csv file
 class StatisticsReport {
 public:
-    typedef std::vector<ov::runtime::ProfilingInfo> PerformaceCounters;
+    typedef std::map<std::string, InferenceEngine::InferenceEngineProfileInfo> PerformaceCounters;
     typedef std::vector<std::pair<std::string, std::string>> Parameters;
 
     struct Config {
