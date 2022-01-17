@@ -1100,6 +1100,25 @@ layout layout_optimizer::get_expected_layout(layout const& current_layout,
     return layout(expected_data_type, expected_format, expected_tensor);
 }
 
+static bool is_node_for_onednn(deconvolution_node const& node) {
+    auto prim = node.get_primitive();
+    auto input_layout = node.get_dependency(0).get_output_layout();
+    auto output_layout = node.get_output_layout();
+
+    // Onednn deconv does not support cross-precision
+    bool onednn_valid_dt = (data_type_traits::is_i8_u8(input_layout.data_type) && data_type_traits::is_i8_u8(output_layout.data_type)) ||
+                            (input_layout.data_type == data_types::f16 && output_layout.data_type == data_types::f16);
+
+    bool onednn_valid_params = onednn_valid_dt &&
+                               input_layout.size.feature[0] >= 16 &&
+                               prim->groups == 1 &&
+                               get_post_ops_count(node) <= 32;
+
+    auto spatial_dims_num = input_layout.format.spatial_num();
+
+    return onednn_valid_dt && onednn_valid_params && spatial_dims_num <= 3;
+}
+
 layout layout_optimizer::get_expected_layout(layout const& current_layout,
                                              deconvolution_node const& node,
                                              layout const& output_or_weights_layout) {
@@ -1112,17 +1131,7 @@ layout layout_optimizer::get_expected_layout(layout const& current_layout,
     auto is_2d = spatial_dims_num == 2;
     bool use_onednn_impls = _optimization_attributes.use_onednn_impls;
 
-    bool onednn_valid_dt = input_layout.data_type == data_types::i8 ||
-                           input_layout.data_type == data_types::u8 ||
-                           input_layout.data_type == data_types::f16;
-
-    bool onednn_valid_params = onednn_valid_dt &&
-                               input_layout.size.feature[0] >= 16 &&
-                               prim->groups == 1 &&
-                               get_post_ops_count(node) <= 32 &&
-                               input_layout.size.batch[0] < 16;  // oneDNNs optimized kernel doesn't support big batches yet
-
-    if (use_onednn_impls && onednn_valid_params && spatial_dims_num <= 3) {
+    if (use_onednn_impls && is_node_for_onednn(node)) {
         if (input_layout.data_type == data_types::f16) {
             if (input_layout.size.batch[0] < 16) {
                 expected_format = is_2d ? cldnn::format::b_fs_yx_fsv16 : cldnn::format::b_fs_zyx_fsv16;
@@ -1404,19 +1413,8 @@ impl_types layout_optimizer::get_preferred_impl_type(program_node& node, format 
                 impl_candidate = impl_types::ocl;
         }
 
-        if (node.is_type<deconvolution>()) {
-            auto& deconv = node.as<deconvolution>();
-            auto input_layout = deconv.input().get_output_layout();
-            bool valid_ic = input_layout.size.feature[0] >= 16;
-            bool valid_groups = deconv.get_primitive()->groups == 1;
-            bool onednn_valid_post_ops = get_post_ops_count(node) <= 32;
-            bool valid_batch = input_layout.size.batch[0] < 16;  // oneDNN's optimized kernel doesn't support big batches yet
-            bool valid_params = valid_ic && valid_groups && onednn_valid_post_ops && valid_batch;
-            if (!valid_params)
-                impl_candidate = impl_types::ocl;
-            if (input_layout.data_type != deconv.get_output_layout().data_type)
-                impl_candidate = impl_types::ocl;
-        }
+        if (node.is_type<deconvolution>() && !is_node_for_onednn(node))
+            impl_candidate = impl_types::ocl;
 
         // [WA] oneDNN doesn't support > 32 post-ops. Remove once oneDNN improve post-ops for GPU.
         if (get_post_ops_count(node) > 32) {
