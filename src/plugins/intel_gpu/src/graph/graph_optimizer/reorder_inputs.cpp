@@ -578,6 +578,28 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
             }
         }
 
+        auto& input = conv_node.input();
+        if (conv_node.impl_type == impl_types::onednn && input.is_type<reorder>() &&
+            input.get_dependencies().front()->get_output_layout().format == format::bfyx) {
+            // For supporting optimizied onednn first convolution, the input format from prev reorder to this conv is changed to a recommended format by onednn.
+            auto input_layout = input.get_output_layout();
+            if (lo.needs_onednn_bfyx_to_blocked(format::bfyx, conv_node.get_output_layout().format, input_layout, conv_node)) {
+                auto new_layout = input_layout;
+                if (new_layout.data_type == data_types::f16)
+                    new_layout.format = format::bs_fs_yx_bsv8_fsv2;
+                else if (new_layout.data_type == data_types::u8 || new_layout.data_type == data_types::i8)
+                    new_layout.format = format::bs_fs_yx_bsv8_fsv4;
+                else
+                    return;
+
+                auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
+                if (new_input.first) {
+                    p.add_intermediate(new_input.first, conv_node, 0, !new_input.second);
+                }
+                conv_node.get_dependencies().front()->set_output_layout(new_layout, false);
+            }
+        }
+
         std::vector<format> wrong_format = {format::b_fs_yx_fsv16, format::bs_fs_yx_bsv32_fsv16};
         std::vector<format> correct_format = {format::b_fs_yx_fsv32, format::bs_fs_yx_bsv32_fsv32};
         for (int i = 0; i < wrong_format.size(); i++) {
