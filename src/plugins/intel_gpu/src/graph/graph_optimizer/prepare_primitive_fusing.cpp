@@ -925,8 +925,6 @@ void prepare_primitive_fusing::fuse_simple_primitives(program &p) {
                                  input_hi.get_output_layout().feature() == 1)))) &&
                                  all_ones(input_data.as<binary_convolution>().get_primitive()->dilation);
 
-            auto expected_format = _lo.get_preferred_format(input_data);
-
             should_fuse |= input_data.is_type<convolution>() && conv_supports_fusings(input_data.as<convolution>()) &&
                            quantize_node.get_scale_shift_opt() &&
                            ((out_dt == data_types::f32 || out_dt == data_types::f16)  ||

@@ -17,6 +17,7 @@
 
 using namespace cldnn;
 
+// XXX: rename this pass to set_required_layouts
 
 // It is a code duplication from convolution_onednn.cpp
 static std::shared_ptr<dnnl::convolution_forward::desc> get_convolution_descriptor(const convolution_node& arg) {
