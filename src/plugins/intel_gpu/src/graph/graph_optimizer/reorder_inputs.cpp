@@ -434,21 +434,14 @@ void insert_reorders_in_dir(program& p, const std::map<program_node*, format::ty
             out_layout.format.dimension() == target_input0_format.dimension())
             out_layout.format = target_input0_format;
 
-        // When the input is fed into different convolutions, create separate cache entry
-        bool needs_split_reorder = false;
-        bool use_onednn_impls = lo.get_optimization_attributes().use_onednn_impls;
-        if (node->is_type<convolution>() && use_onednn_impls)
-            needs_split_reorder = lo.needs_onednn_small_ic_to_blocked(out_layout.format, in_layout, node->as<convolution>());
-        // XXX: find the pattern and simplify
-
         auto reorder_pair = rf.get_reorder(travel_direction_wrapper<dir>::first(node, next)->id(),
                                            in_layout,
-                                           out_layout, needs_split_reorder);
+                                           out_layout);
         auto reorder = reorder_pair.first;
 
         if (reorder) {
             auto& reorder_node = p.get_or_create(reorder);
-            // std::cout << __func__ << "" << node->id() << "(" << ") --> " << next->id() << "(" << "): " << reorder_node.id() << " ## " << fmt_to_str(in_layout.format) << " --> " << fmt_to_str(out_layout.format) << std::endl;
+            // XXX std::cout << __func__ << "" << node->id() << "(" << ") --> " << next->id() << "(" << "): " << reorder_node.id() << " ## " << fmt_to_str(in_layout.format) << " --> " << fmt_to_str(out_layout.format) << std::endl;
             p.add_intermediate(reorder_node,
                                *travel_direction_wrapper<dir>::second(node, next),
                                *travel_direction_wrapper<dir>::first(node, next),
