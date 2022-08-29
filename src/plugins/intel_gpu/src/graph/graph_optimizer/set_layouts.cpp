@@ -76,22 +76,24 @@ static std::shared_ptr<dnnl::convolution_forward::desc> get_convolution_descript
 void set_layouts::run(program& p) {
     OV_ITT_SCOPED_TASK(itt::domains::CLDNN, "CLDNN::pass::SetLayouts");
 
-    // TODO: if !supports_immad, return
+    auto& engine = p.get_engine();
+    const auto& device_info = engine.get_device_info();
 
     for (auto n : p.get_processing_order()) {
-        if (!n->is_type<convolution>() || !layout_optimizer::are_data_types_suitable_for_onednn(*n)) {
+        if (!n->is_type<convolution>()
+            || !layout_optimizer::are_data_types_suitable_for_onednn(*n)
+            || !device_info.supports_immad) {
             // only care for onednn convolutions
             continue;
         }
         auto& node = n->as<convolution>();
 
-        auto& engine = p.get_engine();
         auto desc = get_convolution_descriptor(node);
-        // XXX: did not handle attribute properly. especially for zero-point
+        // Note: did not handle attribute properly. especially for zero-point
         dnnl::primitive_desc prim_desc{&desc->data, nullptr, engine.get_onednn_engine(), nullptr};
         auto src_fmt = onednn::find_data_format(prim_desc.src_desc());
         auto dst_fmt = onednn::find_data_format(prim_desc.dst_desc());
-        std::cout << "Mingyuki: " << node.id() << ": " << fmt_to_str(src_fmt) << " --> " << fmt_to_str(dst_fmt) << std::endl;
+        // XXX: std::cout << "Mingyuki: " << node.id() << ": " << fmt_to_str(src_fmt) << " --> " << fmt_to_str(dst_fmt) << std::endl;
         node.set_required_input0(src_fmt);
         node.set_required_output(dst_fmt);
     }
