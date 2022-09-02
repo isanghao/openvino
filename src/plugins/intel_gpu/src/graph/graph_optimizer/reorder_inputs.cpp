@@ -370,9 +370,9 @@ void minimize_local_reorders(program& p, std::map<program_node*, format::type>& 
     }
 }
 
-static format get_target_output_format(const std::map<program_node*, format::type>& fmt_map, program_node *node) {
+static format get_target_output_format(layout_optimizer& lo, const std::map<program_node*, format::type>& fmt_map, program_node *node) {
     // 1. Check required_output
-    if (node->is_type<convolution>()) {
+    if (lo.get_optimization_attributes().use_onednn_impls && node->is_type<convolution>()) {
         auto &conv = node->as<convolution>();
         auto ret = conv.get_required_output();
         if (ret != format::any)
@@ -387,9 +387,9 @@ static format get_target_output_format(const std::map<program_node*, format::typ
     return node->get_output_layout().format;
 }
 
-static format get_target_input0_format(const std::map<program_node*, format::type>& fmt_map, program_node *node) {
+static format get_target_input0_format(layout_optimizer& lo, const std::map<program_node*, format::type>& fmt_map, program_node *node) {
     // 1. Check required_input
-    if (node->is_type<convolution>()) {
+    if (lo.get_optimization_attributes().use_onednn_impls && node->is_type<convolution>()) {
         auto &conv = node->as<convolution>();
         auto ret = conv.get_required_input0();
         if (ret != format::any)
@@ -425,8 +425,8 @@ void insert_reorders_in_dir(program& p, const std::map<program_node*, format::ty
 
         auto in_layout = travel_direction_wrapper<dir>::first(node, next)->get_output_layout();
         auto out_layout = in_layout;
-        in_layout.format = get_target_output_format(fmt_map, travel_direction_wrapper<dir>::first(node, next));
-        auto target_input0_format = get_target_input0_format(fmt_map, travel_direction_wrapper<dir>::second(node, next));
+        in_layout.format = get_target_output_format(lo, fmt_map, travel_direction_wrapper<dir>::first(node, next));
+        auto target_input0_format = get_target_input0_format(lo, fmt_map, travel_direction_wrapper<dir>::second(node, next));
 
         // If the dimensions are different, use the original dimension. For example: bfzyx -> bfyz
         // It is to conserve the size on z-axis.
