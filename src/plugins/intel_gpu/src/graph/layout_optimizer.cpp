@@ -217,10 +217,10 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
 
     // Do not remove reorder if it is necessary to fulfill required_input
     if (next.is_type<convolution>()) {
-        // XXX: data padding was not taken into consideration
         auto &conv = next.as<convolution>();
         auto reorder_layout = next.get_dependency(0).get_output_layout();
-        if (reorder_layout.format == conv.get_required_input0())
+        if (reorder_layout.format == conv.get_required_input0()
+                && !reorder_layout.data_padding)
             return false;
     }
 
@@ -319,7 +319,6 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
 
         // Remove Reorder for Convolution if mixed layout.
         if (next.is_type<convolution>()) {
-            // XXX: data padding was not taken into consideration
             auto &conv = next.as<convolution>();
             auto& node = prev.get_users().front();
             if (prev.get_output_layout().format == conv.get_required_input0() &&
@@ -402,12 +401,6 @@ bool layout_optimizer::can_fuse_reorder_to_prev(program_node& prev, program_node
         data_type_traits::is_floating_point(dt_next) &&
         fmt_prev == fmt_next)
         return true;
-
-    if (prev.is_type<quantize>() && next->is_type<convolution>()) {
-        auto prev_layout = prev.get_output_layout();
-        if (needs_onednn_small_ic_to_blocked(fmt_next, prev_layout, next->as<convolution>()))
-            return false;
-    }
 
     if (prev.is_type<quantize>() &&
         (fmt_next == format::b_fs_yx_fsv4 || fmt_next == format::b_fs_zyx_fsv32 || (fmt_next == format::b_fs_yx_fsv32 && !use_onednn_impls) ||
@@ -838,55 +831,6 @@ static bool is_node_for_onednn(program_node& node, fully_connected_node const& f
     }
 
     return is_suitable_for_onednn;
-}
-
-bool layout_optimizer::needs_all_usr_onednn_small_ic_to_blocked(const program_node& node) {
-    bool all_users_match = true;
-    for (auto usr : node.get_users()) {
-        if (!usr->is_type<convolution>()) {
-            all_users_match = false;
-            break;
-        }
-
-        auto input_layout = node.get_output_layout();
-        auto& conv = usr->as<convolution>();
-        auto conv_output_layout = conv.get_output_layout();
-        auto weights_layout = conv.weights(0).get_output_layout();
-        format expected_conv_fmt = get_expected_layout(conv_output_layout, conv, weights_layout).format;
-        if (!needs_onednn_small_ic_to_blocked(expected_conv_fmt, input_layout, conv)) {
-            all_users_match = false;
-            break;
-        }
-    }
-
-    return all_users_match;
-}
-
-/* XXX: this might be removed too?? */
-bool layout_optimizer::needs_onednn_small_ic_to_blocked(format fmt_next, layout& prev_output_layout, const convolution_node& node) {
-    std::vector<format> target_output_format = {
-        format::b_fs_yx_fsv16,
-        format::b_fs_yx_fsv32,
-        format::b_fs_zyx_fsv16,
-        format::b_fs_zyx_fsv32,
-        format::bs_fs_yx_bsv16_fsv16,
-        format::bs_fs_yx_bsv32_fsv16,
-        format::bs_fs_yx_bsv32_fsv32,
-        format::bs_fs_zyx_bsv16_fsv16,
-        format::bs_fs_zyx_bsv32_fsv16,
-        format::bs_fs_zyx_bsv32_fsv32,
-        format::byxf,
-        format::bzyxf,
-    };
-    if (std::find(target_output_format.begin(), target_output_format.end(), fmt_next) == target_output_format.end()) return false;
-
-    // Check input feature size from node.input() in case prev_output_layout used in post operations.
-    int shallow_ch = 8;
-    if (data_type_traits::is_i8_u8(prev_output_layout.data_type)) shallow_ch = 16;
-    if (prev_output_layout.feature() <= shallow_ch && node.input().get_output_layout().feature() <= shallow_ch)
-        return true;
-
-    return false;
 }
 
 // This function is needed to avoid performance regressions for the convolutions with byxf layout

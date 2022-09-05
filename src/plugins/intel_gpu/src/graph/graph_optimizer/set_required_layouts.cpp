@@ -71,7 +71,7 @@ static std::shared_ptr<dnnl::convolution_forward::desc> get_convolution_descript
     }
 }
 
-void set_layouts::run(program& p) {
+void set_required_layouts::run(program& p) {
     OV_ITT_SCOPED_TASK(itt::domains::CLDNN, "CLDNN::pass::SetRequiredLayouts");
 
     auto& engine = p.get_engine();
@@ -91,8 +91,10 @@ void set_layouts::run(program& p) {
         dnnl::primitive_desc prim_desc{&desc->data, nullptr, engine.get_onednn_engine(), nullptr};
         auto src_fmt = onednn::find_data_format(prim_desc.src_desc());
         auto dst_fmt = onednn::find_data_format(prim_desc.dst_desc());
-        // XXX: Add proper log message
-        // std::cout << "Mingyuki: " << node.id() << ": " << fmt_to_str(src_fmt) << " --> " << fmt_to_str(dst_fmt) << std::endl;
+        GPU_DEBUG_GET_INSTANCE(debug_config);
+        GPU_DEBUG_IF(debug_config->verbose >= 2) {
+            std::cout << __FILE__ << ":" << node.id() << ": " << fmt_to_str(src_fmt) << " --> " << fmt_to_str(dst_fmt) << std::endl;
+        }
         node.set_required_input0(src_fmt);
         node.set_required_output(dst_fmt);
     }
