@@ -441,7 +441,10 @@ void insert_reorders_in_dir(program& p, const std::map<program_node*, format::ty
 
         if (reorder) {
             auto& reorder_node = p.get_or_create(reorder);
-            // XXX std::cout << __func__ << "" << node->id() << "(" << ") --> " << next->id() << "(" << "): " << reorder_node.id() << " ## " << fmt_to_str(in_layout.format) << " --> " << fmt_to_str(out_layout.format) << std::endl;
+            GPU_DEBUG_GET_INSTANCE(debug_config);
+            GPU_DEBUG_IF(debug_config->verbose >= 2) {
+                std::cout << __func__ << "" << node->id() << "(" << ") --> " << next->id() << "(" << "): " << reorder_node.id() << " ## " << fmt_to_str(in_layout.format) << " --> " << fmt_to_str(out_layout.format) << std::endl;
+            }
             p.add_intermediate(reorder_node,
                                *travel_direction_wrapper<dir>::second(node, next),
                                *travel_direction_wrapper<dir>::first(node, next),

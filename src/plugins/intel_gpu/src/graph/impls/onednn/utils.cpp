@@ -130,7 +130,7 @@ dnnl::memory::format_tag convert_data_format(cldnn::format fmt) {
     }
 }
 
-// Let's reduce code duplication
+// XXX: Let's reduce code duplication
  cldnn::format convert_data_format(dnnl::memory::format_tag fmt) {
     switch (fmt) {
         case dnnl::memory::format_tag::nchw: return cldnn::format::bfyx;
