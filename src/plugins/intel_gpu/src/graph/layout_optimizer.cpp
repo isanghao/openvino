@@ -1003,11 +1003,9 @@ layout layout_optimizer::get_expected_layout(layout const& current_layout,
     bool i8_u8_input = input_layout.data_type == data_types::u8 || input_layout.data_type == data_types::i8;
 
     if (use_onednn_impls && onednn_valid_post_ops) {
-        // XXX: need to take the situation into consideration where it is called from prepare_primitive_fusing
         expected_format = node.get_required_output();
     } else {
         /* *************************** Native impls format selection part ************************** */
-        // XXX: to be removed. it can be handled directly from reorder_inputs
         if (use_onednn_impls && i8_u8_input) {
             // It is here because of post operation condition for onednn.
             // Use fsv32 for onednn friendliness.
@@ -1598,13 +1596,12 @@ format layout_optimizer::get_preferred_format(program_node& node) {
             return all_users_gemm;
         };
 
-        // XXX: we may need to take into considration a situation where there are more than 1 conv
         if (use_onednn_impls) {
-                if (node.get_users().front()->is_type<convolution>() && node.get_users().front()->as<convolution>().get_required_input0() != format::any) {
-                    auto &conv = node.get_users().front()->as<convolution>();
-                    expected = conv.get_required_input0();
-                } else
-                    expected = format::any;
+            if (node.get_users().front()->is_type<convolution>() && node.get_users().front()->as<convolution>().get_required_input0() != format::any) {
+                auto &conv = node.get_users().front()->as<convolution>();
+                expected = conv.get_required_input0();
+            } else
+                expected = format::any;
         } else if (only_gemm_users(node)) {
             // TODO: Gemm is not supporting fsv layouts
             if (node.get_output_layout().format.dimension() == 6) {
