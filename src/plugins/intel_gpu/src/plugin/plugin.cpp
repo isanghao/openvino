@@ -137,7 +137,9 @@ Plugin::Plugin() : m_default_contexts({}) {
 
         // Set default configs for each device
         for (auto& device : device_map) {
-            m_configs_map.insert({device.first, ExecutionConfig(ov::device::id(device.first))});
+            auto config = ExecutionConfig(ov::device::id(device.first));
+            config.set_property(ov::intel_gpu::queue_type(QueueTypes::in_order));
+            m_configs_map.insert({device.first, config});
             auto ctx = std::make_shared<RemoteCLContext>(GetName() + "." + device.first, std::vector<cldnn::device::ptr>{ device.second });
             m_default_contexts.insert({device.first, ctx});
         }
