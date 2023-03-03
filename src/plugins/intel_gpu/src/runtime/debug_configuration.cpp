@@ -127,6 +127,7 @@ static void print_help_messages() {
                               " For example fc:onednn gemm:onednn reduce:ocl do:cpu"
                               " For primitives fc, gemm, do, reduce, concat are supported. Separated by space.");
     message_list.emplace_back("OV_GPU_MaxKernelsPerBatch", "Maximum number of kernels in a batch during compiling kernels");
+    message_list.emplace_back("OV_GPU_UseBfs", "Use BFS ordering to execute nodes"); 
 
     auto max_name_length_item = std::max_element(message_list.begin(), message_list.end(),
         [](std::pair<std::string, std::string>& a, std::pair<std::string, std::string>& b){
@@ -160,7 +161,8 @@ debug_configuration::debug_configuration()
         , dump_layers_raw(0)
         , base_batch_for_memory_estimation(-1)
         , serialize_compile(0)
-        , max_kernels_per_batch(0) {
+        , max_kernels_per_batch(0)
+        , use_dfs(0) {
 #ifdef GPU_DEBUG_CONFIG
     get_gpu_debug_env_var("Help", help);
     get_common_debug_env_var("Verbose", verbose);
@@ -186,6 +188,7 @@ debug_configuration::debug_configuration()
     std::string forced_impl_types_str;
     get_gpu_debug_env_var("ForceImplTypes", forced_impl_types_str);
     get_gpu_debug_env_var("MaxKernelsPerBatch", max_kernels_per_batch);
+    get_gpu_debug_env_var("UseDfs", use_dfs);
 
     if (help > 0) {
         print_help_messages();

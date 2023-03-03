@@ -7,6 +7,9 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <set>
+#include "intel_gpu/primitives/data.hpp"
+#include "intel_gpu/primitives/mutable_data.hpp"
 
 namespace cldnn {
 // helper method for calc_processing order
@@ -76,6 +79,52 @@ void program::nodes_ordering::calculate_BFS_processing_order() {
             processing_order_iterators[node] = _processing_order.end();
             processing_order_iterators[node]--;
         }
+    }
+    return;
+}
+
+
+static void dfs(program_node* node, std::set<program_node*> &visited, std::vector<program_node *> &order) {
+    std::cout << "DFS: Try visit node: " << node->id() << std::endl;
+    if (visited.find(node) != visited.end())
+        return;
+    
+    for (auto dep_pair: node->get_dependencies()) {
+        std::cout << "DFS:   check dependency: " << dep_pair.first->id() << std::endl;
+        // if any of node's dependency is not visited, we cannot process it at this moment.
+        auto dep = dep_pair.first;
+        if (dep->is_type<data>() || dep->is_type<mutable_data>()) {
+            visited.insert(dep);
+            order.push_back(dep);
+        }
+
+        if (visited.find(dep_pair.first) == visited.end()) {
+            std::cout << "DFS:   not ready..." << std::endl;
+            return;
+        }
+    }
+
+    visited.insert(node);
+    order.push_back(node);
+
+    for (auto user : node->get_users()) {
+        dfs(user, visited, order);
+    }
+}
+
+
+ void program::nodes_ordering::calculate_DFS_processing_order() {
+    GPU_DEBUG_DEFINE_MEM_LOGGER("calculate_DFS_processing_order");
+    std::set<program_node*> visited;
+    std::vector<program_node *> order;
+    for (auto node : _processing_order)
+        dfs(node, visited, order);
+    _processing_order.clear();
+    for (auto node : order) {
+        _processing_order.push_back(node);
+        std::cout << __func__ << ": " << node->id() << std::endl;
+        processing_order_iterators[node] = _processing_order.end();
+        processing_order_iterators[node]--;
     }
     return;
 }

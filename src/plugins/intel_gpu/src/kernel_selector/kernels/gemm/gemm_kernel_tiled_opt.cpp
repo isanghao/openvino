@@ -218,20 +218,28 @@ KernelsPriority GemmKernelTiledOpt::GetKernelsPriority(const Params& params, con
 }
 
 bool GemmKernelTiledOpt::Validate(const Params& params, const optional_params& options) const {
+    printf("%s:%d\n", __FILE__, __LINE__);
     if (!Parent::Validate(params, options))
         return false;
+    printf("%s:%d\n", __FILE__, __LINE__);
 
     const auto& gmm_params = static_cast<const gemm_params&>(params);
     bool gemm_leftovers = gmm_params.inputs[0].X().v % 16 || gmm_params.inputs[0].Y().v % 16 ||
                           gmm_params.inputs[1].X().v % 16 || gmm_params.inputs[1].Y().v % 16;
     // If gmm_params has dynamic inputs, the correct dimension value cannot be obtained
     // and leftovers cannot be calculated, so it returns false
-    if ((gmm_params.transpose_input0 || gmm_params.transpose_input1) && (gemm_leftovers || gmm_params.has_dynamic_inputs()))
+    if ((gmm_params.transpose_input0) && (gemm_leftovers || gmm_params.has_dynamic_inputs())) {
+        printf("%s:%d %d %d %d - %d %d %d %d\n", __FILE__, __LINE__, (int)gmm_params.transpose_input0, (int)gmm_params.transpose_input1, (int)gemm_leftovers,
+            (int)gmm_params.inputs[0].X().v, (int)gmm_params.inputs[0].Y().v,
+            (int)gmm_params.inputs[0].X().v, (int)gmm_params.inputs[0].Y().v);
         return false;
+    }
+    printf("%s:%d\n", __FILE__, __LINE__);
 
     for (size_t i = 1; i < gmm_params.inputs.size(); i++)
         if (gmm_params.inputs[0].GetDType() != gmm_params.inputs[i].GetDType())
             return false;
+    printf("%s:%d\n", __FILE__, __LINE__);
 
     return true;
 }

@@ -99,6 +99,7 @@ public:
     int serialize_compile;                      // Serialize creating primitives and compiling kernels
     std::vector<std::string> forced_impl_types; // Force implementation type either ocl or onednn
     int max_kernels_per_batch;                  // Maximum number of kernels in a batch during compiling kernels
+    int use_dfs;                                // Use DFS ordering for node execution
     static const debug_configuration *get_instance();
     bool is_dumped_layer(const std::string& layerName, bool is_output = false) const;
 };

@@ -67,6 +67,7 @@ public:
             return 1 + (int32_t)std::distance(_processing_order.begin(), const_iterator(iter));
         }
         void calculate_BFS_processing_order();
+        void calculate_DFS_processing_order();
         size_t size() { return _processing_order.size(); }
         bool is_correct(program_node* node);
 

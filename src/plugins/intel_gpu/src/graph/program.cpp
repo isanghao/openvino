@@ -619,7 +619,11 @@ void program::pre_optimize_graph(bool is_internal) {
     // handle symmetric and asymmetric padding for input
     apply_opt_pass<handle_input_padding>();
 
-    processing_order.calculate_BFS_processing_order();  // this method makes sense only for OOOQ (out of order execution queue)
+    GPU_DEBUG_GET_INSTANCE(debug_config);
+    GPU_DEBUG_IF(debug_config->use_dfs) {
+        processing_order.calculate_DFS_processing_order();  // this method makes sense only for in-order queue
+    } else
+        processing_order.calculate_BFS_processing_order();  // this method makes sense only for OOOQ (out of order execution queue)
 
     apply_opt_pass<reverse_optional_nodes_outputs>();
 
