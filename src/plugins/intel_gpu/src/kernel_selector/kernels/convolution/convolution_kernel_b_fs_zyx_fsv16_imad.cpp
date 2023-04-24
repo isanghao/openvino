@@ -87,7 +87,7 @@ Convolution_kernel_b_fs_zyx_fsv16_imad::GetBlockParams(const convolution_params&
 
     auto best_block_params_ratio = EstimateBlockParamsRatio(params, test_block_params);
 
-    size_t max_slm_split = params.engineInfo.maxWorkGroupSize / simd;
+    size_t max_slm_split = 512 / simd;
 
     // TGLU exceptions related to SLM usage
     if (params.engineInfo.deviceType == dev_type::integrated_gpu && params.engineInfo.computeUnitsCount == 96) {
@@ -174,7 +174,7 @@ Convolution_kernel_b_fs_zyx_fsv16_imad::GetBlockParams(const convolution_params&
 }
 
 float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateBlockParamsRatio(const convolution_params& params, const BlockParams& block) const {
-    float occupancy_by_logic_size = static_cast<float>(params.outputs[0].LogicalSize() / static_cast<size_t>(params.engineInfo.maxThreadsPerDevice));
+    float occupancy_by_logic_size = static_cast<float>(params.outputs[0].LogicalSize() / static_cast<size_t>(224));
     bool increase_max_reg_pressure = occupancy_by_logic_size >= 595.f;
     bool twice_increase_max_reg_pressure = occupancy_by_logic_size >= 595.f * 2.f;
     float max_reg_pressure = twice_increase_max_reg_pressure ? 0.785f : increase_max_reg_pressure ? 0.75f : 0.7f;
@@ -188,27 +188,10 @@ float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateBlockParamsRatio(const con
     float reg_pressure = EstimateRegPressure(params, block);
 
     // Estimate fb32 usage factor
-    auto& output = params.outputs[0];
+    // auto& output = params.outputs[0];
     float feature_block_32 = static_cast<float>(block.output_block_features == 32);
     float fb32_factor = -5.f;
-    if (params.engineInfo.deviceType == dev_type::discrete_gpu && params.engineInfo.supports_imad) {
-        // Known cases where fb32 for discrete GPU works better
-        bool fb32_exception_1 = output.X().v % 13 == 0 && output.X().v * output.Feature().v == 13312;
-        bool fb32_exception_2 = (output.X().v % 28 == 0 && output.X().v * output.Feature().v == 14336) || (output.X().v == 14 && output.Feature().v == 512);
-        bool fb32_exception_3 = (output.X().v == 5 || output.X().v == 9) && output.Feature().v == 128;
-        bool fb32_exception_4 = output.X().v == 18 && output.Feature().v == 64;
-        bool fb32_exception_5 = output.X().v == 37 && output.Feature().v == 512;
-        bool fb32_exception_6 = output.X().v == 17 && output.Feature().v == 256;
-
-        // Accumulate exceptions for z == 1
-        bool fb32_exceptions = fb32_exception_1 || fb32_exception_2 || fb32_exception_3 || fb32_exception_4 || fb32_exception_5 || fb32_exception_6;
-
-        // Exception for z != 1
-        bool fb32_exception_z = output.X().v == output.Y().v && output.X().v % 28 == 0 && output.Z().v == 40 && output.Feature().v % 32 == 0;
-
-        if ((output.X().v == output.Y().v && output.Z().v == 1 && fb32_exceptions) || fb32_exception_z)
-            fb32_factor = 1.f;
-    } else if (occupancy_by_logic_size >= 2500.f) {
+    if (occupancy_by_logic_size >= 2500.f) {
         fb32_factor = 0.5f;
     }
 
@@ -222,11 +205,11 @@ float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateBlockParamsRatio(const con
     float slm_usage_factor = atanf(occupancy) / 3.14159f;
 
     size_t cur_increase_occupancy_coeff = (block.output_block_features == fsv ? 2 : 1) * block.feature_slm_split;
-    size_t max_increase_occupancy_coeff = 2 * params.engineInfo.maxWorkGroupSize / simd;
+    size_t max_increase_occupancy_coeff = 2 * 512 / simd;
     float can_increase_occupancy_coeff = static_cast<float>(max_increase_occupancy_coeff) / static_cast<float>(cur_increase_occupancy_coeff);
 
     // We should check if there is a possibility for increase of occupancy if occupancy is less than 1.0
-    auto c_ifm_mul = CeilDiv(params.weights.IFM().v, fsv) % (params.engineInfo.maxWorkGroupSize / simd) == 0;
+    auto c_ifm_mul = CeilDiv(params.weights.IFM().v, fsv) % (512 / simd) == 0;
     auto can_increase_occupancy = (occupancy * can_increase_occupancy_coeff >= 1.0f) && c_ifm_mul;
 
     float reduce_occupancy = 0.0f;
@@ -288,8 +271,8 @@ float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateOccupancy(const convolutio
     size_t block_b = params.outputs[0].Batch().v;
 
     auto threads = blocks_w * blocks_h * blocks_d * blocks_f * block_b;
-
-    return static_cast<float>(threads) / static_cast<float>(params.engineInfo.maxThreadsPerDevice);
+    // std::cout << "max threads per device " << params.engineInfo.maxThreadsPerDevice << std::endl;   1024 for dg2, 224 for igpu
+    return static_cast<float>(threads) / static_cast<float>(224);
 }
 
 float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateSLMUsage(const convolution_params& params, const BlockParams& block) const {
@@ -315,10 +298,12 @@ float Convolution_kernel_b_fs_zyx_fsv16_imad::EstimateSLMUsage(const convolution
                                 params.groups;
 
     // Check work groups per device limitations
-    size_t max_threads_per_compute_unit = static_cast<size_t>(params.engineInfo.maxThreadsPerExecutionUnit);
+    size_t max_threads_per_compute_unit = 7;
+    // std::cout << "max_threads_per_compute_unit " << max_threads_per_compute_unit << std::endl;   8 for dg2, 7 for igpu
+
     constexpr size_t max_compute_units_per_sub_slice = 8;
     constexpr size_t max_work_groups_per_sub_slice = 16;
-    size_t max_sub_slices_per_device = params.engineInfo.computeUnitsCount / max_compute_units_per_sub_slice;
+    size_t max_sub_slices_per_device = 32 / max_compute_units_per_sub_slice;
     size_t max_work_groups_per_device = max_sub_slices_per_device * max_work_groups_per_sub_slice;
     if (work_groups_number > max_work_groups_per_device * 100)
         return 0.f;
