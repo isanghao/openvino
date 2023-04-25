@@ -461,6 +461,8 @@ ConvolutionKernelBase::DispatchData Convolution_kernel_b_fs_zyx_fsv16_imad::SetD
 KernelsPriority Convolution_kernel_b_fs_zyx_fsv16_imad::GetKernelsPriority(const Params& params, const optional_params& /*options*/) const {
     const auto& p = static_cast<const convolution_params&>(params);
 
+    if (p.outputs[0].Feature().v >= 1280 && p.inputs[0].Feature().v >= 1280)
+        return DONT_USE_IF_HAVE_SOMETHING_ELSE;
     if (static_cast<float>(p.weights.IFM().v) / static_cast<float>(Align(p.weights.IFM().v, fsv)) < 0.5f)
         return FORCE_PRIORITY_4;
     else
