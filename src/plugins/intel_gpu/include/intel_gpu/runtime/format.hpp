@@ -203,6 +203,7 @@ struct format {
         os_is_yx_osv32_isv4,                          ///< format for weights for IMAD convolutions
         os_is_zyx_osv32_isv4,                         ///< format for weights for IMAD convolutions
         os_is_yx_osv32_isv32p,                        ///< format for weights for binary convolutions
+        os_is_yx_osv16_isv2,                          ///< format used for onednn PVC
         lstm_weights_dio,                             ///< dynamic_lstm, direction,
                                                       ///< than IO (I - input size, O - 4 * hidden_size)
         os_is_osv32_isv32_swizzled_by_4,              ///< format for weights for 1x1 IMAD convolution
