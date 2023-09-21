@@ -129,94 +129,24 @@ KERNEL(convolution)(
         }
         weights_offset += WEIGHTS_IS_PITCH / FSV * LWG_DEPTH;
 
+        FILTER_TYPE4 wei_val;
         unroll_for (uint out_fi = 0; out_fi < FEATURES_PER_WI; ++out_fi) {
             int wei_i = _sub_group_shuffle(wei_sg[out_fi / SIMD], out_fi % SIMD);
             FILTER_TYPE4 wei_val = AS_FILTER_TYPE4(wei_i);
-
+#if 0
             dotProd[out_fi] = IMAD(dotProd[out_fi], in_val, wei_val);
-        }
-    }
-
-#if FORCE_PREFETCH
-    // No thread should ever enter this, but forces the compiler to not split
-    // weights/input prefetching instructions in main loop into conditional
-    // block.
-    if (f == OUTPUT_FEATURE_NUM) {
-        dotProd[0] += 0 * in_u;
-        unroll_for (uint out_fi = 0; out_fi < FEATURES_PER_WI; ++out_fi) {
-            dotProd[out_fi] += 0 * wei_sg_pre[out_fi / SIMD];
-        }
-    }
-#endif
-
-#if LWG_DEPTH != 1
-    // Accumulation is split across work-group.
-    // Store partial results.
-    local int lwg_acc[(LWG_DEPTH - 1) * SIMD * FEATURES_PER_WI];
-    uint lwg_offset = (lwg_d - 1) * SIMD * FEATURES_PER_WI + get_sub_group_local_id();
-    if (lwg_d != 0) {
-        unroll_for (uint i = 0; i < FEATURES_PER_WI; ++i) {
-            lwg_acc[lwg_offset] = dotProd[i];
-            lwg_offset += SIMD;
-        }
-    }
-    // Synchronize writes.
-    barrier(CLK_LOCAL_MEM_FENCE);
-    // Accumulate in first sub-group.
-    if (lwg_d == 0) {
-        lwg_offset = get_sub_group_local_id();
-        unroll_for (uint j = 0; j < LWG_DEPTH - 1; ++j) {
-            unroll_for (uint i = 0; i < FEATURES_PER_WI; ++i) {
-                dotProd[i] += lwg_acc[lwg_offset];
-                lwg_offset += SIMD;
-            }
-        }
-    } else {
-    // End other threads.
-        return;
-    }
-#endif
-
-    if (!SAFE_SPATIAL && yx >= MAX_SPATIAL_SIZE)
-        return;
-
-    uint output_offset_base = GET_OUTPUT_INDEX(b, f, y, x) / FSV;
-
-    // TODO Handle output features % FSV != 0
-    unroll_for (uint out_fi = 0; out_fi < FEATURES_PER_WI / FSV; ++out_fi) {
-        if (!SAFE_FEATURES && f + out_fi * FSV >= OUTPUT_FEATURE_NUM)
-            return;
-
-        uint output_offset = output_offset_base + out_fi * (OUTPUT_FS_PITCH / FSV);
-        DEQUANTIZED_TYPE4 dequantized;
-        unroll_for (uint out_fii = 0; out_fii < FSV; ++out_fii) {
-            dequantized[out_fii] = TO_DEQUANTIZED_TYPE(dotProd[out_fi * FSV + out_fii]);
-        }
-
-#if BIAS_TERM
-        uint bias_offset = f + out_fi * FSV;
-        BIAS_TYPE4 bias = ((const __global BIAS_TYPE4*)(biases + bias_offset))[0];
-        dequantized += TO_DEQUANTIZED_TYPE4(bias);
-#endif
-
-    OUTPUT_TYPE4 out;
-
-#if HAS_FUSED_OPS
-        FUSED_OPS_PRELOAD;
-        FUSED_OPS_CALC;
-        out = TO_OUTPUT_TYPE4(FUSED_OPS_RESULT);
 #else
-        out = TO_OUTPUT_TYPE4(dequantized);
+            dotProd[out_fi] = IMAD(0, in_val, wei_val);
+            int tmp = 0;
+            tmp += in_val[0] * wei_val[0];
+            tmp += in_val[1] * wei_val[1];
+            tmp += in_val[2] * wei_val[2];
+            tmp += in_val[3] * wei_val[3];
+            printf("%d %d %d - %u * %d => %d, %d\n", (int)get_global_id(0),(int)get_global_id(1), (int)get_global_id(2), in_val, wei_val, dotProd[out_fi], tmp);
 #endif
-        if (OUTPUT_FEATURE_NUM % FSV != 0 && f + out_fi * FSV + FSV >= OUTPUT_FEATURE_NUM) {
-            if (OUTPUT_FEATURE_NUM % FSV <= 1)
-                out.s1 = (OUTPUT_TYPE)(0);
-            if (OUTPUT_FEATURE_NUM % FSV <= 2)
-                out.s2 = (OUTPUT_TYPE)(0);
-            out.s3 = (OUTPUT_TYPE)(0);
         }
-        output[output_offset] = out;
     }
+
 }
 
 #undef FSV
