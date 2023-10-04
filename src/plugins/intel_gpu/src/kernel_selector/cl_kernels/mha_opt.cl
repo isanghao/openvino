@@ -39,7 +39,12 @@
  * NUM_COL_THREAD
  * COL_THREAD_SIZE
  */
-// REQD_SUB_GROUP_SIZE(16)
+// #define SUB_GROUP_SIZE 8
+#define SUB_GROUP_VEC_TYPE half8
+
+#ifdef SUB_GROUP_SIZE
+REQD_SUB_GROUP_SIZE(SUB_GROUP_SIZE)
+#endif
 // __attribute__((reqd_work_group_size(1, 1, 16)))
 KERNEL(mha_opt)(
     OPTIONAL_SHAPE_INFO_ARG
@@ -129,6 +134,7 @@ KERNEL(mha_opt)(
 
         // S = matmul(Q, K) and get max value.
         row_max = -HALF_MAX;
+#ifndef SUB_GROUP_SIZE
         for (int c = 0; c < BLK_COL_SIZE; c++) {
             VEC_TYPE acc4 = 0.f;
             unroll_for (int d = 0; d < DEPTH_SIZE; d += VEC_SIZE) {
@@ -143,8 +149,38 @@ KERNEL(mha_opt)(
 #ifdef MEASURE_BLOCK_4
             accum += P[BLK_COL_SIZE * row_id + c];
             accum += row_max;
-#endif
+#    endif
         }
+#else /* !SUB_GROUP_SIZE */
+        for (int c = 0; c < BLK_COL_SIZE; c++) {
+            SUB_GROUP_VEC_TYPE acc16 = 0.f;
+
+            for (int d = 0; d < DEPTH_SIZE; d += SUB_GROUP_SIZE) {
+                SUB_GROUP_VEC_TYPE a = *(SUB_GROUP_VEC_TYPE*)(q_block + DEPTH_SIZE * row_id + d);
+                SUB_GROUP_VEC_TYPE b;
+                half __b = as_half(_sub_group_block_read_us((const __local ushort*)(k_block + DEPTH_SIZE * c + d) + (0)));
+
+                unroll_for(int s = 0; s < SUB_GROUP_SIZE; s++) {
+                    b[s] = sub_group_broadcast(__b, s);
+                }
+                acc16 = mad(a, b, acc16);
+            }
+
+            half acc = 0.f;
+
+            unroll_for(int i = 0; i < SUB_GROUP_SIZE; i++) {
+                acc += acc16[i];
+            }
+
+            P[BLK_COL_SIZE * row_id + c] = acc;
+
+            row_max = max(row_max, acc);
+#    ifdef MEASURE_BLOCK_4
+            accum += P[BLK_COL_SIZE * row_id + c];
+            accum += row_max;
+#    endif
+}
+#endif
         m = max(p_m, row_max);
 
 #ifdef RETURN_BLOCK_4
