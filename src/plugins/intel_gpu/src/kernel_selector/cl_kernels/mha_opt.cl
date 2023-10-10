@@ -56,13 +56,15 @@ KERNEL(mha_opt)(
     const uint b = (uint)get_global_id(0) / OUTPUT_FEATURE_NUM; // batch index
     const uint f = (uint)get_global_id(0) % OUTPUT_FEATURE_NUM; // head index
     const uint block_id = (uint)get_global_id(1);
-    const uint row_id = (uint)get_global_id(2) / NUM_COL_THREAD;
-    const uint col_tid = (uint)get_global_id(2) % NUM_COL_THREAD;
+    // const uint row_id = (uint)get_global_id(2) / NUM_COL_THREAD;
+    // const uint col_tid = (uint)get_global_id(2) % NUM_COL_THREAD;
+    const uint row_id = (uint)get_global_id(2) % BLK_ROW_SIZE;
+    const uint col_tid = (uint)get_global_id(2) / BLK_ROW_SIZE;
 
-    const int col_t_start = col_tid * 4;
-    const int col_t_end = col_t_start + 4;
-    const int col_t_start2 = col_tid * 8;
-    const int col_t_end2 = col_t_start2 + 8;
+    const int col_t_start = col_tid * 8;
+    const int col_t_end = col_t_start + 8;
+    const int col_t_start2 = col_tid * 16;
+    const int col_t_end2 = col_t_start2 + 16;
     half p_l = 0;
     half l = 0;
     __local half p_m[BLK_ROW_SIZE];
@@ -171,7 +173,7 @@ KERNEL(mha_opt)(
             row_max[row_id][col_tid] = max(row_max[row_id][col_tid], acc);
 #ifdef MEASURE_BLOCK_4
             accum += P[BLK_COL_SIZE * row_id + c];
-            accum += row_max;
+            // accum += row_max;
 #    endif
         }
 
@@ -206,9 +208,11 @@ KERNEL(mha_opt)(
             row_max = max(row_max, acc);
 #    ifdef MEASURE_BLOCK_4
             accum += P[BLK_COL_SIZE * row_id + c];
-            accum += row_max;
 #    endif
         }
+#endif
+#ifdef RETURN_BLOCK_4
+        continue;
 #endif
         barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -221,9 +225,6 @@ KERNEL(mha_opt)(
         }
 
         barrier(CLK_LOCAL_MEM_FENCE);
-#ifdef RETURN_BLOCK_4
-        continue;
-#endif
         // Calculate P
         row_sum = 0.0f;
         VEC_TYPE e = 0.f;
@@ -256,14 +257,12 @@ KERNEL(mha_opt)(
         l = exp_m * p_l + row_sum;
 
         // Calculate O + PV block.
-        half acc = 0.f;
-        VEC_TYPE acc4 = 0.f;
         for (int d = col_t_start2; d < col_t_end2; d++) {
-            acc4 = 0.f;
+            half acc = 0.f;
+            VEC_TYPE acc4 = 0.f;
             unroll_for (int c = 0; c < BLK_COL_SIZE; c += VEC_SIZE) {
-                acc4 = mad(*(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + c), *(VEC_TYPE*)(v_block + BLK_COL_SIZE * d + c), acc4);
+                acc4 = mad(*(VEC_TYPE*)(v_block + BLK_COL_SIZE * d + c), *(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + c), acc4);
             }
-            acc = 0.f;
 #if VEC_SIZE > 1
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
                 acc += acc4[i];

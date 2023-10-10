@@ -69,7 +69,7 @@ MHAKernelOpt::TuningData MHAKernelOpt::GetTuningData(const mha_params& params) c
     td.v_blk_size     = td.k_blk_size;
     td.score_mat_size = td.blk_row_size * td.blk_col_size;
     td.out_blk_size   = td.q_blk_size;
-    td.num_col_thread = 8; // params.engineInfo.maxWorkGroupSize/td.blk_col_size;
+    td.num_col_thread = 4; // params.engineInfo.maxWorkGroupSize/td.blk_col_size;
     td.col_thread_size = 8;
     return td;
 }
@@ -84,8 +84,8 @@ CommonDispatchData MHAKernelOpt::SetDefault(const mha_params& params) const {
     auto td = GetTuningData(params);
     std::cout << __FILE__ << ":" << __LINE__ << " Tuning Data:\n" << td.to_string()
         << ", max group size: " << params.engineInfo.maxWorkGroupSize << std::endl;
-    dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size*8};
-    dispatchData.lws = {1, 1, td.blk_row_size*8};
+    dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size*4};
+    dispatchData.lws = {1, 1, td.blk_row_size*4};
     // dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size * 8};
     // dispatchData.lws = {1, 1, td.blk_row_size * 8};
 
