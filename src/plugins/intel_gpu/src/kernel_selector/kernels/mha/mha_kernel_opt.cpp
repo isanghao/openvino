@@ -84,8 +84,8 @@ CommonDispatchData MHAKernelOpt::SetDefault(const mha_params& params) const {
     auto td = GetTuningData(params);
     std::cout << __FILE__ << ":" << __LINE__ << " Tuning Data:\n" << td.to_string()
         << ", max group size: " << params.engineInfo.maxWorkGroupSize << std::endl;
-    dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size*4};
-    dispatchData.lws = {1, 1, td.blk_row_size*4};
+    dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size*2};
+    dispatchData.lws = {1, 1, td.blk_row_size*2};
     // dispatchData.gws = {batch * feature, td.num_blk_row, td.blk_row_size * 8};
     // dispatchData.lws = {1, 1, td.blk_row_size * 8};
 
