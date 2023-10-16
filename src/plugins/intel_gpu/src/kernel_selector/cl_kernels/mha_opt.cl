@@ -138,13 +138,14 @@ KERNEL(mha_opt)(
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
                 acc += acc4[i];
             }
-            P[BLK_COL_SIZE * row_id + c] = acc;
+            P[BLK_COL_SIZE * row_id + c] = clamp(acc, -HALF_MAX, HALF_MAX);
             row_max = max(row_max , acc);
 #ifdef MEASURE_BLOCK_4
             accum += P[BLK_COL_SIZE * row_id + c];
             accum += row_max;
 #endif
         }
+        accum = clamp(accum, -HALF_MAX, HALF_MAX);
         m = max(p_m, row_max);
 
 #ifdef RETURN_BLOCK_4

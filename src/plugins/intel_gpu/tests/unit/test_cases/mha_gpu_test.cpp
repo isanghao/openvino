@@ -46,19 +46,19 @@ void test_simple_input(bool is_caching_test) {
     auto input3 = engine.allocate_memory({ data_types::f16, format::bfyx, tensor{ 1, 1, 3, 2 } }); // value
 
     set_values(input1, {
-        FLOAT16(5.0f), FLOAT16(2.0f), FLOAT16(1.0f),
-        FLOAT16(3.0f), FLOAT16(7.0f), FLOAT16(9.0f),
+        ov::float16(5.0f), ov::float16(2.0f), ov::float16(1.0f),
+        ov::float16(3.0f), ov::float16(7.0f), ov::float16(9.0f),
     });
 
     set_values(input2, {
-        FLOAT16(2.0f), FLOAT16(13.0f),
-        FLOAT16(4.0f), FLOAT16(6.0f),
-        FLOAT16(10.0f), FLOAT16(3.0f),
+        ov::float16(2.0f), ov::float16(13.0f),
+        ov::float16(4.0f), ov::float16(6.0f),
+        ov::float16(10.0f), ov::float16(3.0f),
     });
 
     set_values(input3, {
-        FLOAT16(30.0f), FLOAT16(0.0f), FLOAT16(35.0f),
-        FLOAT16(0.0f), FLOAT16(45.0f), FLOAT16(55.0f),
+        ov::float16(30.0f), ov::float16(0.0f), ov::float16(35.0f),
+        ov::float16(0.0f), ov::float16(45.0f), ov::float16(55.0f),
     });
 
     topology topology;
