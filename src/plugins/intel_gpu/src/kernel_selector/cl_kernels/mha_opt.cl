@@ -79,19 +79,19 @@ KERNEL(mha_opt)(
         p_m[row_id] = -HALF_MAX;
         m[row_id] = -HALF_MAX;
     }
-#define AMEASURE_BLOCK_1
-#define AMEASURE_BLOCK_2
-#define AMEASURE_BLOCK_3
-#define AMEASURE_BLOCK_4
+#define MEASURE_BLOCK_1
+#define MEASURE_BLOCK_2
+#define MEASURE_BLOCK_3
+#define MEASURE_BLOCK_4
 #define AMEASURE_BLOCK_5
-#define ARETURN_BLOCK_5
-#define AMEASURE
+#define RETURN_BLOCK_4
+#define MEASURE
     // Read i-th row of Q block
     half accum = 0.0;
     const int q_row_idx = BLK_ROW_SIZE * block_id + row_id;
     for (int c = col_t_start2; c < col_t_end2; c++) {
         // Replace GET_INDEX_SAFE, it's slow.
-        q_block[DEPTH_SIZE * row_id + c] = inputq[INPUT0_GET_INDEX_SAFE(b, f, q_row_idx, c)];
+        q_block[DEPTH_SIZE * row_id + c] = inputq[0];
         O[DEPTH_SIZE * row_id + c] = 0.0f;
 #ifdef MEASURE_BLOCK_1
         accum += q_block[DEPTH_SIZE * row_id + c];
@@ -120,7 +120,7 @@ KERNEL(mha_opt)(
         unroll_for (int y = row_id; y < DEPTH_SIZE; y += BLK_ROW_SIZE) {
             int kidx = INPUT1_GET_INDEX(b, f, y, x_offset);
             unroll_for (int x = col_t_start; x < col_t_end; x++) {
-                k_block[(DEPTH_SIZE * x) + y] = inputk[kidx + x];
+                k_block[(DEPTH_SIZE * x) + y] = inputk[0];
 #ifdef MEASURE_BLOCK_2
                 accum += k_block[(DEPTH_SIZE * x) + y];
 #endif
@@ -135,7 +135,7 @@ KERNEL(mha_opt)(
         unroll_for (int y = row_id; y < BLK_COL_SIZE; y += BLK_ROW_SIZE) {
             int vidx = INPUT2_GET_INDEX(b, f, y_offset + y, 0);
             unroll_for (int x = col_t_start2; x < col_t_end2; x++) {
-                v_block[(BLK_COL_SIZE * x) + y] = inputv[vidx + x];
+                v_block[(BLK_COL_SIZE * x) + y] = inputv[0];
 #ifdef MEASURE_BLOCK_3
                 accum += v_block[(BLK_COL_SIZE * x) + y];
 #endif
@@ -261,7 +261,7 @@ KERNEL(mha_opt)(
             half acc = 0.f;
             VEC_TYPE acc4 = 0.f;
             unroll_for (int c = 0; c < BLK_COL_SIZE; c += VEC_SIZE) {
-                acc4 = mad(*(VEC_TYPE*)(v_block + BLK_COL_SIZE * d + c), *(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + c), acc4);
+                acc4 = c;
             }
 #if VEC_SIZE > 1
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
@@ -270,7 +270,7 @@ KERNEL(mha_opt)(
 #else
             acc = acc4;
 #endif
-            O[DEPTH_SIZE * row_id + d] = exp_m * O[DEPTH_SIZE * row_id + d] + acc;
+            O[DEPTH_SIZE * row_id + d] = acc;
         }
 
         barrier(CLK_LOCAL_MEM_FENCE);

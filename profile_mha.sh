@@ -11,11 +11,11 @@ build_and_measure() {
     echo "$TITLE: $US us, $((US-PREV)) us"
     PREV=$((US))
 }
-if [[ ! -f mha_opt.cl ]]; then
-    echo "cannot find mha_opt.cl file"
-    echo "Please execute this script within cl_kernel directory"
-    exit 1
-fi
+# if [[ ! -f mha_opt.cl ]]; then
+#     echo "cannot find mha_opt.cl file"
+#     echo "Please execute this script within cl_kernel directory"
+#     exit 1
+# fi
 
 # Prepare
 sed -i -e 's/define MEASURE_BLOCK_/define AMEASURE_BLOCK_/' $FILE
