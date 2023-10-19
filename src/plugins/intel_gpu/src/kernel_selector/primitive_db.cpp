@@ -32,6 +32,8 @@ std::vector<code> primitive_db::get(const primitive_id& id) const {
     {
         std::string pattern("#include \"include/fetch_utils.cl\"");
         std::ifstream kernel_file{id + ".cl", std::ios::in | std::ios::binary};
+        if (!kernel_file.is_open())
+            kernel_file.open(std::string("/mnt/local/mingyuki/openvino/src/plugins/intel_gpu/src/kernel_selector/cl_kernels/") + id + ".cl", std::ios::in | std::ios::binary);
         if (kernel_file.is_open() && id == "mha_opt") {
             // std::cout << __FILE__ << ":" << __LINE__ << "  " << id << std::endl;
             code ret;
