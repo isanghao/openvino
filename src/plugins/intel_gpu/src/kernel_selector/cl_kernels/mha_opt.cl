@@ -39,7 +39,7 @@
  * NUM_COL_THREAD
  * COL_THREAD_SIZE
  */
-// #define SUB_GROUP_SIZE 8
+#define ASUB_GROUP_SIZE 8
 #define SUB_GROUP_VEC_TYPE half8
 
 #ifdef SUB_GROUP_SIZE
@@ -53,10 +53,10 @@ KERNEL(mha_opt)(
     const __global INPUT2_TYPE* inputv,
     __global OUTPUT_TYPE* output)
 {
-    const uint b = (uint)get_global_id(0) / OUTPUT_FEATURE_NUM; // batch index
-    const uint f = (uint)get_global_id(0) % OUTPUT_FEATURE_NUM; // head index
+    const uint b = (uint)get_global_id(2) / OUTPUT_FEATURE_NUM; // batch index
+    const uint f = (uint)get_global_id(2) % OUTPUT_FEATURE_NUM; // head index
     const uint block_id = (uint)get_global_id(1);
-    const uint row_id = (uint)get_global_id(2);
+    const uint row_id = (uint)get_global_id(0);
 
     half p_m = -HALF_MAX;
     half m = -HALF_MAX;
@@ -95,8 +95,8 @@ KERNEL(mha_opt)(
     half row_sum = 0.0f;
 
 // note: DEPTH_SIZE is supposed to be multiple of 4 at this moment
-#define VEC_TYPE half4
-#define VEC_SIZE 4
+#define VEC_TYPE half16
+#define VEC_SIZE 16
 
     for (int j = 0; j < NUM_BLK_COL; j++) {
         // Fill Key block
@@ -137,13 +137,26 @@ KERNEL(mha_opt)(
 #ifndef SUB_GROUP_SIZE
         for (int c = 0; c < BLK_COL_SIZE; c++) {
             VEC_TYPE acc4 = 0.f;
+#if 1
+            VEC_TYPE* k_ptr = (VEC_TYPE*)(k_block + DEPTH_SIZE * c);
+            VEC_TYPE* q_ptr = (VEC_TYPE*)(q_block + DEPTH_SIZE * row_id);
+            acc4 = mad(k_ptr[0], q_ptr[0], acc4);
+            acc4 = mad(k_ptr[1], q_ptr[1], acc4);
+            acc4 = mad(k_ptr[2], q_ptr[2], acc4);
+            acc4 = mad(k_ptr[3], q_ptr[3], acc4);
+#else
             unroll_for (int d = 0; d < DEPTH_SIZE; d += VEC_SIZE) {
-                acc4 = mad(*(VEC_TYPE*)(q_block + DEPTH_SIZE * row_id + d), *(VEC_TYPE*)(k_block + DEPTH_SIZE * c + d), acc4);
+                acc4 = mad(*(VEC_TYPE*)(k_block + DEPTH_SIZE * c + d), *(VEC_TYPE*)(q_block + DEPTH_SIZE * row_id + d), acc4);
             }
+#endif
+#if VEC_SIZE > 1
             half acc = 0.f;
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
                 acc += acc4[i];
             }
+#else 
+            half acc = acc4;
+#endif
             P[BLK_COL_SIZE * row_id + c] = acc;
             row_max = max(row_max , acc);
 #ifdef MEASURE_BLOCK_4
@@ -163,7 +176,7 @@ KERNEL(mha_opt)(
                 unroll_for(int s = 0; s < SUB_GROUP_SIZE; s++) {
                     b[s] = sub_group_broadcast(__b, s);
                 }
-                acc16 = mad(a, b, acc16);
+                acc16 = mad(b, a, acc16);
             }
 
             half acc = 0.f;
@@ -188,13 +201,17 @@ KERNEL(mha_opt)(
 #endif
         // Calculate P
         row_sum = 0.0f;
-        half4 e = 0.f;
+        VEC_TYPE e = 0.f;
         unroll_for (int x = 0; x < BLK_COL_SIZE; x += VEC_SIZE) {
             e = exp((*(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + x) - (VEC_TYPE)m));
             *(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + x) = e;
+#if VEC_SIZE > 1
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
                 row_sum += e[i];
             }
+#else
+            row_sum += e;
+#endif
         }
 #ifdef MEASURE_BLOCK_5
         accum += row_sum;
@@ -216,9 +233,13 @@ KERNEL(mha_opt)(
                 acc4 = mad(*(VEC_TYPE*)(P + BLK_COL_SIZE * row_id + c), *(VEC_TYPE*)(v_block + BLK_COL_SIZE * d + c), acc4);
             }
             acc = 0.f;
+#if VEC_SIZE > 1
             unroll_for (int i = 0; i < VEC_SIZE; i++) {
                 acc += acc4[i];
             }
+#else
+            acc += acc4;
+#endif
             O[DEPTH_SIZE * row_id + d] = exp_m * O[DEPTH_SIZE * row_id + d] + acc;
         }
 
