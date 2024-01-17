@@ -574,6 +574,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #endif
     // =====================================================================================================================================
     // Main computation loop
+    int cnt = 0;
     uint iterations = MAIN_LOOP_ELEMENTS_COUNT / (TILE_IFM * SIMD);
     __attribute__((opencl_unroll_hint(1)))
     for (uint ni = 0; ni < iterations; ++ni) {
@@ -800,20 +801,46 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                     }
                 }
             }
+    #if DECOMPRESSION_SCALE_POST_OP && TILE_IFM == 8
+            unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
+                unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
+                    const uint offset_ofm = out_f + fi*SIMD + sglid;
+
+                    #if DECOMPRESSION_SCALE_GROUPS_NUM > 1
+                    // to be fixed: /4 is a hard-coded constant
+                        const uint scale_offset = (offset_ofm % DECOMPRESSION_SCALE_BATCH_NUM) * DECOMPRESSION_SCALE_BATCH_PITCH +
+                                                (((ni*TILE_IFM + ki/4)*SIMD) / DECOMPRESSION_SCALE_GROUP_SIZE)*DECOMPRESSION_SCALE_FEATURE_PITCH;
+                        ACCUMULATOR_TYPE ds = decompression_scale[scale_offset];
+                    #else
+                        ACCUMULATOR_TYPE ds = d_scales[fi % DECOMPRESSION_SCALE_LENGTH];
+                    #endif
+                    ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] * ds;
+                    if (get_global_id(0) == 0 && get_global_id(1) == 0 && get_global_id(2) == 0 && fi == 0)
+                        printf("%d: acc %.2f acc_tmp %.2f, acc_ptr %2.f, (ni*TILE_IFM)*SIMD %u, offset %u, ds %.2f\n", cnt++,
+                            ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi], acc_tmp[bi][fi], ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi], 
+                            (ni*TILE_IFM + ki/4)*SIMD, scale_offset, ds);
+                    acc_tmp[bi][fi] = 0;
+                }
+            }
+    #endif
         }
-#if DECOMPRESSION_SCALE_POST_OP
+#if DECOMPRESSION_SCALE_POST_OP && TILE_IFM == 1
         unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
             unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
                 const uint offset_ofm = out_f + fi*SIMD + sglid;
 
                 #if DECOMPRESSION_SCALE_GROUPS_NUM > 1
                     const uint scale_offset = (offset_ofm % DECOMPRESSION_SCALE_BATCH_NUM) * DECOMPRESSION_SCALE_BATCH_PITCH +
-                                              ((ni*TILE_IFM*SIMD) / DECOMPRESSION_SCALE_GROUP_SIZE)*DECOMPRESSION_SCALE_FEATURE_PITCH;
+                                            (((ni*TILE_IFM)*SIMD) / DECOMPRESSION_SCALE_GROUP_SIZE)*DECOMPRESSION_SCALE_FEATURE_PITCH;
                     ACCUMULATOR_TYPE ds = decompression_scale[scale_offset];
                 #else
                     ACCUMULATOR_TYPE ds = d_scales[fi % DECOMPRESSION_SCALE_LENGTH];
                 #endif
                 ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] * ds;
+                if (get_global_id(0) == 0 && get_global_id(1) == 0 && get_global_id(2) == 0 && fi == 0)
+                    printf("%d: acc %.2f acc_tmp %.2f, acc_ptr %2.f, ni*TILE_IFM*SIMD %u, offset %u, ds %.2f\n", cnt++,
+                        ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi], acc_tmp[bi][fi], ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi], 
+                        ni*TILE_IFM*SIMD, scale_offset, ds);
             }
         }
 #endif
