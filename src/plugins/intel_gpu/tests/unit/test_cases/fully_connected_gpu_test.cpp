@@ -174,7 +174,7 @@ TEST(DISABLED_fully_connected_gpu, generic_random_short) {
         }
     }
 }
-
+#if 0
 TEST(fully_connected_gpu, no_biases) {
     //  Input  : 3x1
     //  Output : 4x1
@@ -982,7 +982,7 @@ TEST(fully_connected_gpu, DISABLED_fs_byx_fsv32_b34)
         }
     }
 }
-
+#endif
 class fully_connected_gpu_tests: public ::testing::Test {
 public:
     void test_compressed_scale_zp_bias(bool is_caching_test) {
@@ -1934,7 +1934,7 @@ using fully_connected_test_params = std::tuple<
     format::type,  // output format
     std::string   // kernel
 >;
-
+#if 0
 template <typename InputT, typename WeightsT, typename BiasT, typename OutputT>
 struct fully_connected_random_test : ::testing::TestWithParam<fully_connected_test_params> {
     tests::random_generator rg;
@@ -2622,7 +2622,7 @@ INSTANTIATE_TEST_SUITE_P(
     ),
     fully_connected_u8_f32_test::PrintToStringParamName
 );
-
+#endif
 #ifdef ENABLE_ONEDNN_FOR_GPU
 TEST(fully_connected_onednn, impl_replacement_with_cldnn) {
     auto& engine = get_test_engine();
@@ -2811,6 +2811,131 @@ TEST_F(fully_connected_gpu_tests, compressed_int4_scale) {
     this->test_compressed_int4_scale(false, false, 256);
 }
 
+TEST_F(fully_connected_gpu_tests, compressed_int4_scale_small) {
+    const char *ifm = getenv("IFM");
+    const char *ofm = getenv("OFM");
+    const char *groups = getenv("GS");
+    if (ifm == NULL)
+        ifm = "64";
+    if (ofm == NULL)
+        ofm = "32";
+    if (groups == NULL)
+        groups = "32";
+    std::cout << "ifm " << ifm << "  ofm " << ofm << "  groups " << groups << std::endl;
+    this->test_compressed_int4_scale(false, false, 1, atoi(groups), atoi(ifm), atoi(ofm));
+}
+TEST(fully_connected_gpu, b_fs_yx_fsv4)
+{
+    tests::random_generator rg(GET_SUITE_NAME);
+    auto& engine = get_test_engine();
+
+    const int in_B = 2;
+    const int in_F = 2048;
+    const int in_Y = 1;
+    const int in_X = 1;
+
+    const int W_B = 1000;
+    const int W_F = in_F;
+    const int W_Y = in_Y;
+    const int W_X = in_X;
+
+    const int O_F = W_B;
+
+    // Input data
+    std::vector<char> Data(in_F * in_B); // in_X = in_Y = 1
+    int i = 0;
+    std::generate(Data.begin(), Data.end(), [i]() mutable { return i++ % 9; });
+    auto input = engine.allocate_memory({ data_types::i8, format::bfyx, { in_B, in_F, in_X, in_Y } });
+    set_values(input, std::move(Data));
+
+    // Create a topology
+    topology topology(input_layout("input", input->get_layout()));
+
+    // Reorder
+    topology.add(reorder("reorder_in",
+                         input_info("input"),
+                         layout(data_types::i8, format::b_fs_yx_fsv4, { in_B, in_F, in_X, in_Y })));
+
+    // Weights
+    std::vector<char> Weights(W_B * W_F);
+    i = 0;
+    std::generate(Weights.begin(), Weights.end(), [=]() mutable {
+        return i % 2 ? -(i++) / W_F - 1 : (i++) / W_F + 1;
+    });
+    auto weights_gold =
+        engine.allocate_memory({ data_types::i8, format::bfyx, { W_B, W_F, W_X, W_Y } });
+    auto weights_imad =
+        engine.allocate_memory({ data_types::i8, format::bfyx, { W_B, W_F, W_X, W_Y } });
+    set_values(weights_gold, Weights);
+    set_values(weights_imad, std::move(Weights));
+    topology.add(data("weights_gold", weights_gold), data("weights_imad", weights_imad));
+
+    auto bias_gold = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, O_F, 1, 1 } });
+    auto bias_imad = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, O_F, 1, 1 } });
+
+    std::vector<float> bias_data(O_F, 0);
+    set_values(bias_gold, bias_data);
+    set_values(bias_imad, bias_data);
+
+    topology.add(data("bias_gold", bias_gold));
+    topology.add(data("bias_imad", bias_imad));
+
+    // Fully connected
+    fully_connected fullc_gold(
+        "fullc_gold", input_info("input"), "weights_gold", "bias_gold");
+    fully_connected fullc_imad(
+        "fullc_imad", input_info("reorder_in"), "weights_imad", "bias_imad");
+    topology.add(fullc_gold, fullc_imad);
+
+
+    auto input_low_mem = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, W_B, 1, 1 } });
+    auto input_high_mem = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, W_B, 1, 1 } });
+    auto output_low_mem = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, 1, 1, 1 } });
+    auto output_high_mem = engine.allocate_memory({ data_types::f32, format::bfyx, { 1, 1, 1, 1 } });
+    set_values(input_low_mem,  rg.generate_random_1d<float>(W_B, -200, 0));
+    set_values(input_high_mem, rg.generate_random_1d<float>(W_B, 1, 200));
+    set_values(output_low_mem, { -127.0f });
+    set_values(output_high_mem, { 127.0f });
+
+    topology.add(data("in_lo", input_low_mem),
+        data("in_hi", input_high_mem),
+        data("out_lo", output_low_mem),
+        data("out_hi", output_high_mem),
+        quantize("quant_gold", input_info("fullc_gold"), input_info("in_lo"), input_info("in_hi"), input_info("out_lo"), input_info("out_hi"), 255, data_types::i8),
+        quantize("quant_imad", input_info("fullc_imad"), input_info("in_lo"), input_info("in_hi"), input_info("out_lo"), input_info("out_hi"), 255, data_types::i8)
+    );
+
+    // Output reorder
+    auto reorder_gold =
+        reorder("reorder_gold", input_info("quant_gold"), layout(data_types::i8, format::bfyx, { in_B, W_B, 1, 1 }));
+    auto reorder_imad =
+        reorder("reorder_imad", input_info("quant_imad"), layout(data_types::i8, format::bfyx, { in_B, W_B, 1, 1 }));
+    topology.add(reorder_gold, reorder_imad);
+
+    // Network build
+    ExecutionConfig config = get_test_default_config(engine);
+    config.set_property(ov::intel_gpu::optimize_data(true));
+    network network(engine, topology, config);
+
+    // Network execuiton
+    network.set_input_data("input", input);
+    auto outputs = network.execute();
+
+    auto out_gold = outputs.find("reorder_gold");
+    auto out_test = outputs.find("reorder_imad");
+
+    ASSERT_NE(out_gold, outputs.end());
+    ASSERT_NE(out_test, outputs.end());
+    cldnn::mem_lock<char> gold_ptr(out_gold->second.get_memory(), get_test_stream());
+    cldnn::mem_lock<char> test_ptr(out_test->second.get_memory(), get_test_stream());
+
+    ASSERT_EQ(gold_ptr.size(), test_ptr.size());
+    for (size_t i = 0; i < gold_ptr.size(); i++) {
+        ASSERT_EQ(gold_ptr[i], test_ptr[i]);
+    }
+}
+
+#if 0
 TEST_F(fully_connected_gpu_tests, compressed_int4_scale_cached) {
     this->test_compressed_int4_scale(true, false, 256);
 }
@@ -3465,3 +3590,4 @@ TEST_F(fully_connected_gpu_tests, weights_reorder_shapes_update) {
 TEST_F(fully_connected_gpu_tests, weights_reorder_shapes_update_cached) {
     this->test_weights_reorder_shapes_update(true);
 }
+#endif

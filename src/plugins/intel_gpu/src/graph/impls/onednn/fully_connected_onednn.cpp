@@ -22,6 +22,7 @@ struct fully_connected_onednn : typed_primitive_onednn_impl<fully_connected> {
     DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::onednn::fully_connected_onednn)
 
 private:
+    memory::ptr _zp_mem; // OneDNN needs broadcasted zp. This is to hold the memory pointer.
     static std::vector<int64_t> reshape_to_2d(const ov::PartialShape& shape, int64_t feature) {
         auto staticShape = shape.to_shape();
         size_t total =
@@ -53,7 +54,7 @@ protected:
         const auto& prim = instance.get_impl_params()->typed_desc<fully_connected>();
         if (prim->compressed_weights) {
             const auto weights_dt = instance.get_input_layout(1).data_type;
-            OPENVINO_ASSERT(ov::element::Type(weights_dt).bitwidth() == 8, "[GPU] oneDNN supports only 8bit compressed weights");
+            OPENVINO_ASSERT(ov::element::Type(weights_dt).bitwidth() <= 8, "[GPU] oneDNN supports only 8bit compressed weights");
 
             if (!prim->decompression_scale.empty()) {
                 auto decompression_scale_idx = prim->bias.empty() ? 2 : 3;
@@ -64,9 +65,16 @@ protected:
 
             if (!prim->decompression_zero_point.empty()) {
                 auto decompression_zp_idx = prim->bias.empty() ? 3 : 4;
-                auto zp_mem = instance.dep_memory_ptr(decompression_zp_idx);
+                memory::ptr zp_mem = instance.dep_memory_ptr(decompression_zp_idx);
+                // TODO: get memory from program_node, instead of primitive because it was manipulated to broadcast
+                if (zp_mem->count() == 1)
+                    zp_mem = instance.get_node().get_dependency(decompression_zp_idx).as<data>().get_attached_memory_ptr();
                 dnnl::memory::desc desc = onednn::layout_to_memory_desc(zp_mem->get_layout(), dnnl::memory::format_tag::a, true);
-                args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_mem->get_onednn_memory(desc)});
+                // args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, instance.get_node().zp_mem->get_onednn_memory(desc)});
+                args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, _zp_mem->get_onednn_memory(desc)});
+
+                // auto &stream = instance.node->get_program().get_engine().get_service_stream();
+                // mem_lock<uint8_t, mem_lock_type::read> zp_data(zp_mem, stream);
             }
         }
 
@@ -189,6 +197,7 @@ protected:
         transform_layouts(input_layout, weights_layout, output_layout, prim_input_size);
 
         auto input_md = onednn::layout_to_memory_desc(input_layout, dnnl::memory::format_tag::ab, false);
+        // TODO: should change format to any. May need a reorder.
         auto weights_md = onednn::layout_to_memory_desc(weights_layout, dnnl::memory::format_tag::ba);
         auto output_md = onednn::layout_to_memory_desc(output_layout, dnnl::memory::format_tag::ab, false);
 
@@ -260,11 +269,13 @@ public:
 #endif
     }
 
+
     static std::unique_ptr<primitive_impl> create(const fully_connected_node& arg, const kernel_impl_params& impl_params) {
         auto& engine = impl_params.prog->get_engine();
         auto& config = impl_params.prog->get_config();
         auto attr = arg.get_onednn_primitive_attributes();
         auto prim = impl_params.typed_desc<fully_connected>();
+        memory::ptr zp_mem(nullptr);
 
         // There may be a performance difference between InnerProduct and MatMul primitives in oneDNN,
         // so use MatMul only for weights compression and IP for all other cases.
@@ -272,22 +283,57 @@ public:
             attr->set_fpmath_mode(dnnl::fpmath_mode::f16, true);
             if (!prim->decompression_scale.empty()) {
                 auto decompression_scale_idx = !arg.bias_term() ? 2 : 3;
+                auto ifm = arg.get_dependency(1).get_output_layout().get_dim(1);
+                auto ngroups = arg.get_dependency(decompression_scale_idx).get_output_layout().get_dim(1);
+                auto group_size = ifm / ngroups;
                 auto data_type = convert_data_type(arg.get_dependency(decompression_scale_idx).get_output_layout().data_type);
-                attr->set_scales(DNNL_ARG_WEIGHTS, 1 << 1, dnnl::memory::dims{}, data_type);
+                attr->set_scales(DNNL_ARG_WEIGHTS, (1 << 1) + (1 << 0), {group_size, 1}, data_type);
             }
 
             if (prim->decompression_zero_point_scalar.has_value()) {
-                OPENVINO_ASSERT(!prim->decompression_zero_point_scalar.has_value(), "[GPU] OneDNN can't use scalar as a zero point value\n");
+                OPENVINO_ASSERT(!prim->decompression_zero_point_scalar.has_value(), "[GPU] UNIMPLEMENTED: scalar zp support\n");
             } else if (!prim->decompression_zero_point.empty()) {
                 auto decompression_zp_idx = !arg.bias_term() ? 3 : 4;
-                auto data_type = convert_data_type(arg.get_dependency(decompression_zp_idx).get_output_layout().data_type);
-                attr->set_zero_points(DNNL_ARG_WEIGHTS, 1 << 1, dnnl::memory::dims{}, data_type);
+                auto decompression_scale_idx = !arg.bias_term() ? 2 : 3;  // it assumes we have decompress_scale
+                auto &zp_node = arg.get_dependency(decompression_zp_idx).as<data>();
+                auto &scale_node = arg.get_dependency(decompression_scale_idx).as<data>();
+                auto ifm = arg.get_dependency(1).get_output_layout().get_dim(1);
+                auto ngroups = arg.get_dependency(decompression_scale_idx).get_output_layout().get_dim(1);
+                auto group_size = ifm / ngroups;
+                auto broadcasted_layout = scale_node.get_output_layout();
+                broadcasted_layout.data_type = data_types::u8;
+                memory::ptr zp_old_mem = zp_node.get_attached_memory_ptr();
+                zp_mem = zp_old_mem;
+                // auto data_type = convert_data_type(zp_node.get_output_layout().data_type);
+
+                // TODO: need to broadcast properly
+                // TODO: broadcast may not be necessary
+                // TODO: need to handle group properly
+                // TODO: can we broadcast in advance?
+                // TODO: review cached impl
+                if (zp_node.get_output_layout().get_linear_size() == 1) {
+                    zp_mem = engine.allocate_memory(broadcasted_layout, false);
+                    auto& stream = engine.get_service_stream();
+                    mem_lock<uint8_t, mem_lock_type::write> zp_new_data(zp_mem, stream);
+                    mem_lock<uint8_t, mem_lock_type::read> zp_old_data(zp_old_mem, stream);
+                    // std::cout << zp_node.get_output_layout().get_linear_size() << std::endl;
+                    for (size_t i = 0; i < zp_new_data.size(); i++)
+                        zp_new_data.data()[i] = static_cast<uint8_t>(zp_old_data.data()[0] & 0xf); // TODO: 0xf only if data-type of zp is int4
+                    // std::cout << arg.id() << " zp " << zp_new_mem << " - " << (int)zp_new_data.data()[0] << "   old mem " << zp_old_mem << std::endl;
+
+                    // TODO: attach to different place. This is reused multiple times and sometimes non-broadcasted one is required.
+                }
+
+
+                attr->set_zero_points(DNNL_ARG_WEIGHTS, (1 << 1) + (1 << 0), {group_size, 1}, dnnl::memory::data_type::u8);
             }
 
             auto prim_desc = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
                                                              prim->input_size, !prim->bias.empty(), *attr);
 
-            return cldnn::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc);
+            auto prim = cldnn::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc);
+            prim->_zp_mem = zp_mem;
+            return prim;
         } else {
             auto prim_desc = get_inner_product_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
                                                                     prim->input_size, !prim->bias.empty(), *attr);

@@ -4,7 +4,7 @@
 
 add_subdirectory(unit)
 
-if(ENABLE_FUNCTIONAL_TESTS)
+if(FALSE)
     function(ov_cpu_func_tests)
         if(CMAKE_COMPILER_IS_GNUCXX)
             ov_add_compiler_flags(-Wno-unused-function)

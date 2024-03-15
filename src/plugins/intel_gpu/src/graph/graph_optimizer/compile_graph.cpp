@@ -50,7 +50,7 @@ void compile_graph::run(program& p) {
 
             // Do not change impl (i.e. do not use ocl shape-agnostic kernels) in case of FC and 8bit compressed weights,
             // since oneDNN primitives/kernels caching mechanism will be used instead.
-            if (fc_prim->compressed_weights && ov::element::Type(weights_dt).bitwidth() == 8)
+            if (fc_prim->compressed_weights && (ov::element::Type(weights_dt).bitwidth() <= 8))
                 change_initial_impl = false;
         }
 
