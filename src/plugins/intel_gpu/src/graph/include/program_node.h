@@ -299,7 +299,8 @@ public:
 
     // check/set if the node can be optimized out (removed from the network)
     bool can_be_optimized() const { return optimized; }
-    void can_be_optimized(bool opt) { optimized = opt; }
+    void can_be_optimized(bool opt) { optimized = opt;
+    }
 
     // check/set if the node's buffer can be shared during the memory pool optimization
     bool can_share_buffer() const { return share_buffer; }

@@ -86,6 +86,9 @@ struct format {
         bzyxf,
         byfx,                                   ///< To be used when onednn gemm allows permute fusing in transformer network. Not for normal use from cldnn.
         bxfy,                                   ///< To be used when onednn gemm allows permute fusing in transformer network. Not for normal use from cldnn.
+        xbfy,                                   ///< To be used when onednn gemm allows permute fusing in transformer network. Not for normal use from cldnn.
+        ybfx,                                   ///< To be used when onednn gemm allows permute fusing in transformer network. Not for normal use from cldnn.
+        fybx,                                   ///< To be used when onednn gemm allows permute fusing in transformer network. Not for normal use from cldnn.
                                                 ///< for user provided formats.
         b_fs_yx_fsv2,
         b_fs_zyx_fsv2,
@@ -289,6 +292,7 @@ struct format {
         return (fmt == yxfb || fmt == byxf ||
                 fmt == byfx || fmt == bxfy ||
                 fmt == bfyx || fmt == fyxb ||
+                fmt == xbfy || fmt == ybfx || fmt == fybx ||
                 fmt == fbyx || fmt == bfzyx ||
                 fmt == bfwzyx || fmt == bfuwzyx ||
                 fmt == bfvuwzyx);

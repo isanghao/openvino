@@ -1125,7 +1125,7 @@ void primitive_inst::do_runtime_skip_permute() {
         }
     }
     // If the largest value and total size are different, can_be_optimized needs to be reset
-    if (size != max_value) {
+    if (size != max_value && !get_node().can_be_optimized()) {
         GPU_DEBUG_TRACE_DETAIL << "--- Cannot optimize because size(" << size << ") and max_value(" << max_value << ") are different" << std::endl;
         set_can_be_optimized(false);
         return;

@@ -223,6 +223,12 @@ kernel_selector::data_layout to_data_layout(format f) {
             return kernel_selector::data_layout::fbyx;
         case format::fyxb:
             return kernel_selector::data_layout::fyxb;
+        case format::xbfy:
+            return kernel_selector::data_layout::xbfy;
+        case format::ybfx:
+            return kernel_selector::data_layout::ybfx;
+        case format::fybx:
+            return kernel_selector::data_layout::fybx;
         case format::b_fs_yx_fsv2:
             return kernel_selector::data_layout::b_fs_yx_fsv2;
         case format::b_fs_yx_fsv4:

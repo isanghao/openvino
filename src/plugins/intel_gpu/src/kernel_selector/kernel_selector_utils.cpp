@@ -296,6 +296,15 @@ std::vector<size_t> GetOptimalLocalWorkGroupSizes(std::vector<size_t> gws, const
                 case DataLayout::bfxy:
                     layout_order = { y, x, f, b, z, w, u, v };
                     break;
+                case DataLayout::xbfy:
+                    layout_order = { y, f, b, x, z, w, u, v };
+                    break;
+                case DataLayout::ybfx:
+                    layout_order = { x, f, b, y, z, w, u, v };
+                    break;
+                case DataLayout::fybx:
+                    layout_order = { x, b, y, f, z, w, u, v };
+                    break;
                 case DataLayout::bfzyx:
                     layout_order = { x, y, z, f, b, w, u, v };
                     break;

@@ -13,6 +13,7 @@
 #include "quantize_inst.h"
 #include "arg_max_min_inst.h"
 #include "fully_connected_inst.h"
+#include "gemm_inst.h"
 #include "condition_inst.h"
 #include "loop_inst.h"
 #include "program_node.h"
@@ -51,6 +52,12 @@ void compile_graph::run(program& p) {
             // since oneDNN primitives/kernels caching mechanism will be used instead.
             if (fc_prim->compressed_weights)
                 change_initial_impl = false;
+        }
+
+        if (node->is_type<gemm>() && change_initial_impl) {
+            // Do not change impl (i.e. do not use ocl shape-agnostic kernels) in case of compressed weights,
+            // since oneDNN primitives/kernels caching mechanism will be used instead.
+            change_initial_impl = false;
         }
 
         if (change_initial_impl)

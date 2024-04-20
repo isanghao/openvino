@@ -1850,6 +1850,7 @@ format layout_optimizer::get_preferred_format(program_node& node) {
             expected = format::any;
         }
     } else if (node.is_type<permute>()) {
+        // std::cout << "get_preferred_format " << node.id() << std::endl;
         if (node.get_dependencies().size() == 1 && node.get_dependencies().front().first->is_type<convolution>()) {
             auto& conv_node = node.get_dependencies().front().first->as<convolution>();
             const auto& fmt = get_preferred_format(conv_node);
@@ -1860,6 +1861,8 @@ format layout_optimizer::get_preferred_format(program_node& node) {
                 expected = format::b_fs_yx_fsv32;
             }
         }
+        if (node.get_preferred_output_fmt() != format::any)
+            expected = node.get_preferred_output_fmt();
     } else if (node.is_type<reduce>()) {
         auto& reduce_node = node.as<reduce>();
         auto output_layout = reduce_node.get_output_layout();
@@ -2030,27 +2033,46 @@ void layout_optimizer::select_preferred_formats_for_onednn(program_node& node, d
         // Optimized out permute from permute-gemm pattern. i.e. permute -> gemm
         if (node.is_type<gemm>()) {
             // Only the formats below support permute opt out in gemm and permute pattern. For other formats, need to check the gemm performance.
-            std::vector<format> gemm_in_foramt_white_list = {
+            std::vector<format> gemm_in_format_white_list = {
                 format::bfyx,
                 format::fyxb,
                 format::byfx,
                 format::bxfy,
+                format::xbfy,
+                format::xbfy,
+                format::fybx
             };
             for (size_t idx = 0 ; idx < node.get_dependencies().size() ; idx++) {
                 if (node.get_dependency(idx).is_type<permute>()) {
+                    std::cout << node.get_dependency(idx).id() << " : " << __LINE__ << std::endl;
                     auto& pnode = node.get_dependency(idx);
                     if (pnode.has_fused_primitives()) {
+                        std::cout << node.get_dependency(idx).id() << " : " << __LINE__ << std::endl;
                         continue;
                     }
                     auto input_lay = pnode.get_dependency(0).get_output_layout();
                     auto output_lay = pnode.get_output_layout();
-                    if (input_lay.compatible(output_lay)) {
-                        for (auto candidate : gemm_in_foramt_white_list) {
+                    // std::cout << "input_layout " << input_lay << std::endl;
+                    // std::cout << "output_layout " << output_lay << std::endl;
+                    if (true || input_lay.compatible(output_lay)) {
+                        std::cout << node.get_dependency(idx).id() << " : " << __LINE__ << std::endl;
+                        for (auto candidate : gemm_in_format_white_list) {
                             auto impl_param = pnode.get_kernel_impl_params();
                             auto desc = impl_param->typed_desc<permute>();
                             auto permute_order = desc->permute_order;
                             std::vector<size_t> l_permute_order(std::begin(permute_order), std::end(permute_order));
+                            // std::cout << "l_permute_order ";
+                            // for (size_t i = 0; i < l_permute_order.size(); i++) {
+                            //     std::cout << l_permute_order[i] << " ";
+                            // }
+                            // std::cout << "   candidate_order ";
+                            // auto &order = format::traits(static_cast<format::type>(candidate))._order;
+                            // for (size_t i = 0; i < order.size(); i++) {
+                            //     std::cout << order[i] << " ";
+                            // }
+                            std::cout << std::endl;
                             if (format::traits(static_cast<format::type>(candidate))._order == l_permute_order) {
+                                std::cout << node.get_dependency(idx).id() << " : " << __LINE__ << "   - idx " << idx << std::endl;
                                 pnode.init_preferred_fmt(1, 1);
                                 pnode.set_preferred_output_fmt(0, format(static_cast<format::type>(candidate)));
                                 pnode.can_be_optimized(true);

@@ -173,6 +173,8 @@ public:
         // TODO: consolidate to _impl_param in the future
         _impl_params->_can_be_optimized = optimized;
          this->_can_be_optimized = optimized;
+        // if (id().find("transpose") != std::string::npos)
+        //     std::cout << "can_be_optimized " << id() << "  " << optimized << std::endl;
     }
     std::shared_ptr<const primitive> desc() const { return _impl_params->desc; }
     program_node const& get_node() const { return *_node; }

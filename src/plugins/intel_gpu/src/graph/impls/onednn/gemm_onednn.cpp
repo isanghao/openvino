@@ -106,6 +106,7 @@ protected:
 
         in0_fmt = onednn::convert_gemm_data_format(in0_dims, in0_l.format);
         in1_fmt = onednn::convert_gemm_data_format(in1_dims, in1_l.format);
+        // std::cout << "mingyuki" << ": " << fmt_to_str(in0_l.format)<< ": " << fmt_to_str(in1_l.format) << "  " << (int)in0_fmt << "  " << (int)in1_fmt << std::endl;
         out_fmt = onednn::convert_gemm_data_format(out_dims, out_l.format);
 
         if (prim->transpose_input0) {
@@ -330,6 +331,10 @@ attach_gemm_onednn::attach_gemm_onednn() {
         format::bxfy,
         format::bfzyx,
         format::bfwzyx,
+        format::xbfy,
+        format::ybfx,
+        format::fybx,
+        // format::fyxb
     };
     implementation_map<gemm>::add(impl_types::onednn, gemm_onednn::create, dt, fmt);
 }
