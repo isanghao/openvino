@@ -23,7 +23,7 @@ KERNEL(dynamic_quantize_gpu_opt)(
 
     half8 val;
     half max;
-    half grp_max = 0.0h;
+    half grp_max = 0.001h;
     unroll_for (int i = 0; i < group_size/8; ++i) {
         val = fabs(as_half8(vload8(0, input + offset + (i * 8))));
 

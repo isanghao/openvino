@@ -30,9 +30,6 @@ public:
         tests::random_generator rg(GET_SUITE_NAME);
         auto& engine = get_test_engine();
 
-        if (engine.get_device_info().dev_type == device_type::discrete_gpu)
-            GTEST_SKIP();
-
         long int batch_num = batch;
         long int ifm_num = ifm;
 
@@ -86,13 +83,6 @@ public:
         config.set_property(ov::intel_gpu::optimize_data(true));
 
         network::ptr network = get_network(engine, topology, config, get_test_stream_ptr(), is_caching_test);
-
-        // if (is_dynamic && !engine.get_device_info().supports_immad) {
-        //     auto inst = network->get_primitive("dyn_quan_prim");
-        //     auto impl = inst->get_impl();
-        //     ASSERT_TRUE(impl != NULL);
-        //     ASSERT_EQ(impl->get_kernels().size(), size_t((is_dynamic ? 3 : 2))); // shape-agnostic kernels
-        // }
 
         network->set_input_data("input", input_mem);
 
