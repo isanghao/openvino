@@ -123,3 +123,4 @@ public:
 TEST_F(dynamic_quantization_gpu_tests, simple_quantizing_large_size) {
     this->test_dynamic_quantization(false, false, 2048, 4096);
 }
+

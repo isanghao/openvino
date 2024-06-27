@@ -124,3 +124,4 @@ bool DynamicQuantizeKernelOpt::Validate(const Params& params) const {
     return true;
 }
 }  // namespace kernel_selector
+
