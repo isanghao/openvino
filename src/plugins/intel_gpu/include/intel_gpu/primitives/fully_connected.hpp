@@ -167,6 +167,7 @@ struct fully_connected : public primitive_base<fully_connected> {
         ob << activation_scale;
         ob << input_size;
         ob << weights_rank;
+        ob << dynamic_quantized_activation;
 
         if (decompression_zero_point_scalar.has_value()) {
             ob << true;
@@ -186,6 +187,7 @@ struct fully_connected : public primitive_base<fully_connected> {
         ib >> activation_scale;
         ib >> input_size;
         ib >> weights_rank;
+        ib >> dynamic_quantized_activation;
 
         bool has_value;
         ib >> has_value;

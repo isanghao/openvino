@@ -244,6 +244,7 @@ public:
         ob << input_size;
         ob << has_bias;
         ob << is_compressed;
+        ob << prim->dynamic_quantized_activation;
 
         bool has_decompression_scale = !prim->decompression_scale.empty();
         if (has_decompression_scale) {
@@ -269,9 +270,11 @@ public:
         size_t input_size = 2;
         bool has_bias = false;
         bool is_compressed = false;
+        bool dynamic_quantized_activation;
         ib >> input_size;
         ib >> has_bias;
         ib >> is_compressed;
+        ib >> dynamic_quantized_activation;
 
         const kernel_impl_params* impl_params = reinterpret_cast<kernel_impl_params*>(ib.getKernelImplParams());
         auto prim = impl_params->typed_desc<fully_connected>();
@@ -298,6 +301,17 @@ public:
                                      _ds_group_size,
                                      _dzp_data_type,
                                      _attrs);
+        }
+
+        if (dynamic_quantized_activation) {
+            // Note: it supports per-token activation scale only
+            auto partial_shape = impl_params->get_input_layout(0).get_partial_shape();
+            auto innermost_len = partial_shape[partial_shape.size() - 1].get_length();
+
+            // FIXME: data type is fixed to f16
+            auto act_scale_data_type = convert_data_type(data_types::f16);
+            std::cout << __FILE__ << ":" << __LINE__ << "  ref set_scale" << std::endl;
+            _attrs->set_scales(DNNL_ARG_SRC, (1 << 1) | (1 << 0), dnnl::memory::dims{1, innermost_len}, act_scale_data_type);
         }
 
         if (is_compressed) {
