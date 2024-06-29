@@ -304,13 +304,16 @@ public:
         }
 
         if (dynamic_quantized_activation) {
+            int input_idx = has_bias ? 2 : 1;
+            if (has_decompression_scale)
+                input_idx++;
+            if (has_decompression_zp)
+                input_idx++;
             // Note: it supports per-token activation scale only
             auto partial_shape = impl_params->get_input_layout(0).get_partial_shape();
             auto innermost_len = partial_shape[partial_shape.size() - 1].get_length();
 
-            // FIXME: data type is fixed to f16
-            auto act_scale_data_type = convert_data_type(data_types::f16);
-            std::cout << __FILE__ << ":" << __LINE__ << "  ref set_scale" << std::endl;
+            auto act_scale_data_type = convert_data_type(impl_params->get_input_layout(input_idx).data_type);
             _attrs->set_scales(DNNL_ARG_SRC, (1 << 1) | (1 << 0), dnnl::memory::dims{1, innermost_len}, act_scale_data_type);
         }
 
@@ -435,11 +438,11 @@ public:
 
             if (prim->dynamic_quantized_activation) {
                 // Note: it supports per-token activation scale only
-                auto partial_shape = arg.get_dependency(0).get_output_layout().get_partial_shape();
+                ++idx;
+                auto partial_shape = impl_params.input_layouts[0].get_partial_shape();
                 auto innermost_len = partial_shape[partial_shape.size() - 1].get_length();
 
-                // FIXME: accessing output_layout(1) looks weird. Need to check proper port.
-                auto act_scale_data_type = convert_data_type(arg.get_dependency(++idx).get_output_layout(true, 1).data_type);
+                auto act_scale_data_type = convert_data_type(impl_params.input_layouts[idx].data_type);
                 attr->set_scales(DNNL_ARG_SRC, (1 << 1) | (1 << 0), dnnl::memory::dims{1, innermost_len}, act_scale_data_type);
             }
 

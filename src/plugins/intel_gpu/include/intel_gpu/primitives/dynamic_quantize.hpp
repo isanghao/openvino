@@ -19,24 +19,13 @@ struct dynamic_quantize : public primitive_base<dynamic_quantize> {
     /// @param id This primitive id
     /// @param input Input primitive id
     /// @param output_size Output data size of the primitive
-    dynamic_quantize(const primitive_id& id,
-           const input_info& input,
-           const size_t group_size,
-           const padding& output_padding = padding())
-           : primitive_base(id, {input}, {output_padding})
-	   , group_size(group_size) {}
-
-    /// @brief Constructs dynamic_quantize primitive
-    /// @param id This primitive id
-    /// @param input Input primitive id
     /// @param data_type Output data type of quantized
-    /// @param output_padding Output data size of the primitive
     dynamic_quantize(const primitive_id& id,
            const input_info& input,
            const size_t group_size,
-           const data_types data_type,
+           const std::vector<optional_data_type> data_types = {optional_data_type(data_types::f16), optional_data_type(data_types::i8)},
            const padding& output_padding = padding())
-           : primitive_base(id, {input}, {output_padding}, {optional_data_type{data_type}}, 2)
+           : primitive_base(id, {input}, {output_padding}, data_types, 2)
 	   , group_size(group_size) {}
 
     size_t group_size = 0;

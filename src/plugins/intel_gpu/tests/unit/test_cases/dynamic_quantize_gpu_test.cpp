@@ -45,7 +45,7 @@ public:
         auto in_layout = is_dynamic ? layout{ dyn_input_ps, data_types::f16, format::bfyx }
                                     : layout{ input_ps, data_types::f16, format::bfyx };
 
-        auto dyn_quan_prim = dynamic_quantize("dyn_quan_prim", input_info("input"), 32, data_types::i8);
+        auto dyn_quan_prim = dynamic_quantize("dyn_quan_prim", input_info("input"), 32, {data_types::f16, data_types::i8});
 
         // Implemented dynamic quantize kernel
         auto get_ref_results = [&]() {
