@@ -1365,12 +1365,12 @@ public:
     }
 
 
-    void test_compressed_int4_scale(bool is_caching_test, bool is_dynamic, long int batch_num, long int scales_group_size = 128) {
+    void test_compressed_int4_scale(bool is_caching_test, bool is_dynamic, long int batch_num, long int scales_group_size = 128, long int ifm = 256, long int ofm = 256) {
         tests::random_generator rg(GET_SUITE_NAME);
         auto& engine = get_test_engine();
 
-        long int ifm_num = 256;
-        long int ofm_num = 256;
+        long int ifm_num = ifm;
+        long int ofm_num = ofm;
 
         auto input_mem = engine.allocate_memory({ { batch_num, ifm_num}, data_types::f16, format::bfyx });
         auto weights_mem = engine.allocate_memory({ {ofm_num, ifm_num}, data_types::u4, format::bfyx });
