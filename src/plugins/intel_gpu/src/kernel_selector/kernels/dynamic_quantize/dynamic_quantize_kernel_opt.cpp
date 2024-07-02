@@ -6,7 +6,34 @@
 #include "kernel_selector_utils.h"
 #include <string>
 
+
+static constexpr size_t simd = 16;
+
 namespace kernel_selector {
+static std::pair<size_t, size_t> get_input_bf_size(const dynamic_quantize_params& params) {
+    size_t input_f = params.inputs[0].Feature().v;
+    size_t input_batch = params.inputs[0].Batch().v;
+    // 3D input
+    if (params.outputs[0].GetLayout() == DataLayout::bfyx) {
+        input_f = params.inputs[0].Y().v;
+        input_batch = params.inputs[0].Batch().v * params.inputs[0].Feature().v;
+    }
+
+    return {input_batch, input_f};
+}
+
+static size_t get_match_vector_size(const dynamic_quantize_params& params) {
+    auto block_sizes = { 8, 4, 2 };
+
+    for (auto block_size : block_sizes) {
+        if (((params.inputs[0].X().v * params.inputs[0].Y().v) / simd) % block_size == 0) {
+            return block_size;
+        }
+    }
+
+    return 1;
+}
+
 ParamsKey DynamicQuantizeKernelOpt::GetSupportedKey() const {
     ParamsKey k;
     k.EnableInputDataType(Datatype::F16);
@@ -34,7 +61,15 @@ ParamsKey DynamicQuantizeKernelOpt::GetSupportedKey() const {
 JitConstants DynamicQuantizeKernelOpt::GetJitConstants(const dynamic_quantize_params& params) const {
     JitConstants jit = MakeBaseParamsJitConstants(params);
 
+    auto vec_size = get_match_vector_size(params);
+
+    jit.AddConstant(MakeJitConstant("VEC_SIZE", vec_size));
+    jit.AddConstant(MakeJitConstant("SIMD", simd));
     jit.Merge(GetTensorFriendlyWorkGroupsJit(params.outputs[0]));
+
+    GPU_DEBUG_LOG << "DynamicQuantizeKernelOpt VEC_SIZE(" << vec_size << ") input bfyx (" << params.inputs[0].Batch().v
+            << ", " << params.inputs[0].Feature().v << ", " << params.inputs[0].Y().v << ", "  << params.inputs[0].X().v << ")" << std::endl;
+
 
     return jit;
 }
@@ -43,8 +78,10 @@ CommonDispatchData DynamicQuantizeKernelOpt::SetDefault(const dynamic_quantize_p
     GPU_DEBUG_GET_INSTANCE(debug_config);
     CommonDispatchData dispatchData;
 
-    dispatchData.gws = {16, 1, params.inputs[0].Batch().v * params.inputs[0].Feature().v};
-    dispatchData.lws = {16, 1, 1};
+    // dispatchData.gws = {simd, 1, params.inputs[0].Batch().v * params.inputs[0].Feature().v};
+    auto batch = get_input_bf_size(params).first;
+    dispatchData.gws = {simd, 1, batch};
+    dispatchData.lws = {simd, 1, 1};
 
     return dispatchData;
 }
@@ -57,6 +94,9 @@ void DynamicQuantizeKernelOpt::GetUpdateDispatchDataFunc(KernelData& kd) const {
         kd.kernels[0].params.workGroups.global = dispatchData.gws;
         kd.kernels[0].params.workGroups.local = dispatchData.lws;
         kd.kernels[0].skip_execution = false;
+
+        GPU_DEBUG_LOG << "Update Dispatch data DynamicQuantizeKernelOpt gws : " << dispatchData.gws[0] << ", "
+                << dispatchData.gws[1] << ", " << dispatchData.gws[2] << std::endl;
     };
 }
 
@@ -92,8 +132,6 @@ KernelsData DynamicQuantizeKernelOpt::GetKernelsData(const Params& params) const
                      static_cast<int>(prim_params.outputs.size()),
                      prim_params.is_shape_agnostic);
 
-    // std::cout << ">> Select dynamic_quantize_kernel_opt : " << prim_params.outputs.size() << std::endl;
-
     return {kd};
 }
 
@@ -118,7 +156,10 @@ bool DynamicQuantizeKernelOpt::Validate(const Params& params) const {
     const auto& dq_params = static_cast<const dynamic_quantize_params&>(params);
 
     // Todo : Add proper exception here
-    if ((dq_params.outputs[0].X().v * dq_params.outputs[0].Y().v % 32) != 0)
+    if (((dq_params.inputs[0].X().v * dq_params.inputs[0].Y().v) % (simd * 2)) != 0)
+        return false;
+
+    if (dq_params.inputs[0].GetPaddedVal() != 0 || dq_params.outputs[0].GetPaddedVal() != 0)
         return false;
 
     return true;
