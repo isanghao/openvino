@@ -8,6 +8,7 @@
 #error "dynamic_quantize_gpu_opt.cl: Unsupported output dimension"
 #endif
 
+#define VEC_SIZE 8
 REQD_SUB_GROUP_SIZE(16)
 KERNEL(dynamic_quantize_gpu_opt)(
     OPTIONAL_SHAPE_INFO_ARG
@@ -23,11 +24,24 @@ KERNEL(dynamic_quantize_gpu_opt)(
     const uint group_size = (INPUT0_FEATURE_PITCH / 16 / num_sg);
     const uint offset = bf * INPUT0_FEATURE_PITCH + group_size * (sglid + 16 * sgid);
     __local half partial_max[32]; // FIXME: 16 is an arbitrary number
+#if VEC_SIZE > 0
+    half8 array[VEC_SIZE];
+#else
+    half8 array[1];
+#endif
     half8 val;
     half max;
     half grp_max = 0.001h;
 
-    unroll_for (int i = 0; i < group_size/8; ++i) {
+    unroll_for (int i = 0; i < VEC_SIZE; i++) {
+        array[i] = as_half8(vload8(0, input + offset + (i * 8)));
+        val = fabs(array[i]);
+
+        max = fmax(fmax(fmax(val[0], val[1]), fmax(val[2], val[3])),
+                                fmax(fmax(val[4], val[5]), fmax(val[6], val[7])));
+        grp_max = fmax(grp_max, max);
+    }
+    unroll_for (int i = VEC_SIZE; i < group_size/8; ++i) {
         val = fabs(as_half8(vload8(0, input + offset + (i * 8))));
 
         max = fmax(fmax(fmax(val[0], val[1]), fmax(val[2], val[3])),
@@ -41,12 +55,17 @@ KERNEL(dynamic_quantize_gpu_opt)(
 
     // calculate global max
     max_value = partial_max[0];
-    for (int i = 1; i < num_sg; i++)
+    unroll_for (int i = 1; i < num_sg; i++)
         max_value = fmax(max_value, partial_max[i]);
 
     half scale = 127.0h / max_value;
 
-    unroll_for (int i = 0; i < group_size/8; ++i) {
+    unroll_for (int i = 0; i < VEC_SIZE; ++i) {
+        val = array[i];
+        val *= scale;
+        vstore8(convert_char8(val), 0, output + offset + i*8);
+    }
+    unroll_for (int i = VEC_SIZE; i < group_size/8; ++i) {
         val = as_half8(vload8(0, input + offset + i*8));
         val *= scale;
         vstore8(convert_char8(val), 0, output + offset + i*8);
