@@ -37,21 +37,28 @@ public:
 
         auto input_ps = is_4d ?  ov::PartialShape{ batch_num, 1, 1, ifm_num } : ov::PartialShape{ batch_num, ifm_num};
         auto dyn_input_ps = is_4d ?  ov::PartialShape{ -1, 1, 1, ifm_num } : ov::PartialShape{ -1, ifm_num};
-        auto input_mem = engine.allocate_memory({ input_ps, data_types::f16, format::bfyx });
+        auto input_mem = engine.allocate_memory({ input_ps, data_types::f32, format::bfyx });
 
-        auto input_data = rg.generate_random_1d<ov::float16>(batch_num * ifm_num, -16.0f, 16.0f);
+        auto input_data = rg.generate_random_1d<float>(batch_num * ifm_num, -16.0f, 16.0f);
         set_values(input_mem, input_data);
+
+        auto in_layout_f32 = is_dynamic ? layout{ dyn_input_ps, data_types::f32, format::bfyx }
+                                    : layout{ input_ps, data_types::f32, format::bfyx };
 
         auto in_layout = is_dynamic ? layout{ dyn_input_ps, data_types::f16, format::bfyx }
                                     : layout{ input_ps, data_types::f16, format::bfyx };
 
-        auto dyn_quan_prim = dynamic_quantize("dyn_quan_prim", input_info("input"), 32, {data_types::f16, data_types::i8});
+        auto reorder_1 = reorder("reorder_1", input_info("input"), layout{ input_ps, data_types::f16, format::bfyx });
+        auto dyn_quan_prim = dynamic_quantize("dyn_quan_prim", input_info("reorder_1"), 32, {data_types::f16, data_types::i8});
+        auto reorder_2 = reorder("reorder_2", input_info("dyn_quan_prim"), layout{ input_ps, data_types::f16, format::bfyx });
 
         // Implemented dynamic quantize kernel
         auto get_ref_results = [&]() {
             topology topology(
-                input_layout("input", in_layout),
-                dyn_quan_prim
+                input_layout("input", in_layout_f32),
+                reorder_1,
+                dyn_quan_prim,
+                reorder_2
             );
 
             auto config = get_test_default_config(engine);
@@ -65,7 +72,6 @@ public:
             network.set_input_data("input", input_mem);
 
             auto outputs = network.execute();
-            OPENVINO_ASSERT(outputs.begin()->first == "dyn_quan_prim");
 
             auto output_layout = outputs.begin()->second.get_layout();
             auto output_mem = outputs.begin()->second.get_memory();
@@ -74,8 +80,10 @@ public:
         };
 
         topology topology(
-            input_layout("input", in_layout),
-            dyn_quan_prim
+            input_layout("input", in_layout_f32),
+            reorder_1,
+            dyn_quan_prim,
+            reorder_2
         );
 
         auto config = get_test_default_config(engine);
@@ -87,7 +95,6 @@ public:
         network->set_input_data("input", input_mem);
 
         auto outputs = network->execute();
-        ASSERT_EQ(outputs.begin()->first, "dyn_quan_prim");
 
         auto output_mem = outputs.begin()->second.get_memory();
         cldnn::mem_lock<ov::float16> output_ptr (output_mem, get_test_stream());
