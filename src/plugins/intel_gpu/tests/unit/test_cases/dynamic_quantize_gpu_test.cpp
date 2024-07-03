@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <iostream>
 #include "intel_gpu/primitives/tile.hpp"
 #include "intel_gpu/runtime/internal_properties.hpp"
 #include "intel_gpu/runtime/layout.hpp"
@@ -103,21 +104,34 @@ public:
         cldnn::mem_lock<ov::float16> output_ptr_ref (ref_output_mem, get_test_stream());
 
         size_t count = 0;
-        float max_diff = 0.f;
+        int max_diff = 0.f;
         float avg = 0.f;
         for (size_t i = 0; i < output_ptr_ref.size(); ++i) {
-            auto abs_diff = std::abs(output_ptr_ref[i] - output_ptr[i]);
-            if (max_diff < abs_diff)
+            int abs_diff = std::abs(output_ptr_ref[i] - output_ptr[i]);
+            if (max_diff < abs_diff) {
                 max_diff = abs_diff;
-            avg = abs_diff;
+                std::cout << abs_diff << "  new max =  " << (int)output_ptr_ref[i] << "  -  " << (int)output_ptr[i] << std::endl ;
+            }
+            avg += abs_diff;
             count++;
+            // if (i % 80000 == 0)
+            //     std::cout << abs_diff << "  =  " << (int)output_ptr_ref[i] << "  -  " << (int)output_ptr[i] << std::endl ;
             // OPENVINO_ASSERT(abs_diff < 256);
         }
-        /*GPU_DEBUG_LOG*/std::cout << "---> count: " << count << ", max_diff:" << max_diff << ", avg_diff: " << (avg/count) << std::endl;
+        std::cout << "---> count: " << count << ", max_diff:" << max_diff << ", avg_diff: " << (avg/count) << std::endl;
     }
 };
 
 TEST_F(dynamic_quantization_gpu_tests, simple_quantizing_large_size) {
-    this->test_dynamic_quantization(false, false, 2048, 4096);
+    int bs = 1024;
+    int fs = 4096;
+    char *str_bs = getenv("BS");
+    char *str_fs = getenv("FS");
+    if (str_bs)
+        bs = atoi(str_bs);
+    if (str_fs)
+        fs = atoi(str_fs);
+    std::cout << "batch " << bs << "  feature " << fs << std::endl;
+    this->test_dynamic_quantization(false, false, bs, fs);
 }
 

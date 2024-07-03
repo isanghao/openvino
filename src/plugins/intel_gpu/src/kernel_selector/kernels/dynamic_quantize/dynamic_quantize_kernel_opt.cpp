@@ -43,6 +43,7 @@ CommonDispatchData DynamicQuantizeKernelOpt::SetDefault(const dynamic_quantize_p
     GPU_DEBUG_GET_INSTANCE(debug_config);
     CommonDispatchData dispatchData;
 
+    // FIXME: feature_size / 64 should be multiple of 8
     dispatchData.gws = {64, 1, params.inputs[0].Batch().v * params.inputs[0].Feature().v};
     dispatchData.lws = {64, 1, 1};
 

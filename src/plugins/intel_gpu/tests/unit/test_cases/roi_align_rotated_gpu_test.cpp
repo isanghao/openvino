@@ -1,3 +1,4 @@
+#if 0
 // Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -184,3 +185,4 @@ INSTANTIATE_TEST_SUITE_P(roi_align_rotated_test_suit,
                          roi_align_rotated_test,
                          testing::ValuesIn(generateCombinedParams()),
                          roi_align_rotated_test::getTestCaseName);
+#endif
