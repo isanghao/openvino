@@ -21,9 +21,8 @@ KERNEL(dynamic_quantize_gpu_opt)(
     const uint sgid = get_sub_group_id();
     const uint num_sg = get_num_sub_groups();
     const uint group_size = (INPUT0_FEATURE_PITCH / 16 / num_sg);
-    const uint offset_sglid = group_size * sglid * (sgid + 1);
-    const uint offset = bf * INPUT0_FEATURE_PITCH + offset_sglid;
-    __local half partial_max[16]; // FIXME: 16 is an arbitrary number
+    const uint offset = bf * INPUT0_FEATURE_PITCH + group_size * (sglid + 16 * sgid);
+    __local half partial_max[32]; // FIXME: 16 is an arbitrary number
     half8 val;
     half max;
     half grp_max = 0.001h;
@@ -53,6 +52,6 @@ KERNEL(dynamic_quantize_gpu_opt)(
         vstore8(convert_char8(val), 0, output + offset + i*8);
     }
 
-    if (sglid == 0)
+    if (sglid == 0 && sgid == 0)
         output_scale[bf] = 1.0h / scale;
 }
