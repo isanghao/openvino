@@ -19,8 +19,9 @@ DynamicQuantizeFullyConnected::DynamicQuantizeFullyConnected(size_t group_size) 
     using namespace ov::pass::pattern;
 
     auto data = any_input();
-    auto weights = any_input();
-    auto fully_connected_compressed = wrap_type<op::FullyConnectedCompressed>({data, any_input(), any_input(), any_input(), any_input()});
+    auto fully_connected_compressed3 = wrap_type<op::FullyConnectedCompressed>({data, any_input(), any_input(), any_input()});
+    auto fully_connected_compressed4 = wrap_type<op::FullyConnectedCompressed>({data, any_input(), any_input(), any_input(), any_input()});
+    auto fully_connected_compressed = std::make_shared<ov::pass::pattern::op::Or>(OutputVector{fully_connected_compressed3, fully_connected_compressed4});
 
     ov::matcher_pass_callback callback = [=](Matcher& m) {
         if (transformation_callback(m.get_match_root())) {
@@ -30,7 +31,12 @@ DynamicQuantizeFullyConnected::DynamicQuantizeFullyConnected(size_t group_size) 
         const auto& pattern_map = m.get_pattern_value_map();
         const auto& m_data = pattern_map.at(data).get_node_shared_ptr();
 
-        const auto& m_fc = std::dynamic_pointer_cast<op::FullyConnectedCompressed>(pattern_map.at(fully_connected_compressed).get_node_shared_ptr());
+        std::shared_ptr<ov::intel_gpu::op::FullyConnectedCompressed> m_fc;
+        
+        if (pattern_map.find(fully_connected_compressed3) != pattern_map.end())
+            m_fc = std::dynamic_pointer_cast<op::FullyConnectedCompressed>(pattern_map.at(fully_connected_compressed3).get_node_shared_ptr());
+        else if (pattern_map.find(fully_connected_compressed4) != pattern_map.end())
+            m_fc = std::dynamic_pointer_cast<op::FullyConnectedCompressed>(pattern_map.at(fully_connected_compressed4).get_node_shared_ptr());
 
         const auto innermost_size = m_fc->get_input_partial_shape(0)[m_fc->get_input_partial_shape(0).size() - 1].get_length();
         if (group_size == 0 || (innermost_size % group_size != 0 && static_cast<size_t>(innermost_size) > group_size))
