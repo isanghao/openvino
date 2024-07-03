@@ -27,7 +27,6 @@ DynamicQuantizeFullyConnected::DynamicQuantizeFullyConnected(size_t group_size) 
         if (transformation_callback(m.get_match_root())) {
             return false;
         }
-        // FIXME: need to handle group size
         const auto& pattern_map = m.get_pattern_value_map();
         const auto& m_data = pattern_map.at(data).get_node_shared_ptr();
 
@@ -42,9 +41,6 @@ DynamicQuantizeFullyConnected::DynamicQuantizeFullyConnected(size_t group_size) 
         if (group_size == 0 || (innermost_size % group_size != 0 && static_cast<size_t>(innermost_size) > group_size))
             return false;
 
-        if (m_fc->get_friendly_name().find("__module.model.transformer.h.0.attn.c_attn/aten::linear/MatMul") == std::string::npos)
-            return false;
-        std::cout << "pattern matched " << m_fc->get_friendly_name() << std::endl;
         OutputVector fc_inputs;
         auto dyn_quan = std::make_shared<op::DynamicQuantize>(m_data, group_size);
         for (size_t i = 0; i < m_fc->get_input_size(); i++)

@@ -830,7 +830,6 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
         GPU_DEBUG_IF(cldnn::debug_configuration::get_instance()->dynamic_quantization_group_size > 0) {
             dynamic_quantization_group_size = cldnn::debug_configuration::get_instance()->dynamic_quantization_group_size;
         }
-        dynamic_quantization_group_size = 1048576;
 
         if (device_info.supports_immad && dynamic_quantization_group_size == 1048576) // XXX: 1048576 is considered per-token
             manager.register_pass<ov::intel_gpu::DynamicQuantizeFullyConnected>(dynamic_quantization_group_size);
