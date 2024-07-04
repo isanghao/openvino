@@ -15,7 +15,7 @@ static std::pair<size_t, size_t> get_input_bf_size(const dynamic_quantize_params
     size_t input_batch = params.inputs[0].Batch().v;
     // 3D input
     if (params.outputs[0].GetLayout() == DataLayout::bfyx) {
-        input_f = params.inputs[0].Y().v;
+        input_f = params.inputs[0].Y().v * params.inputs[0].X().v;
         input_batch = params.inputs[0].Batch().v * params.inputs[0].Feature().v;
     }
 
@@ -62,9 +62,16 @@ JitConstants DynamicQuantizeKernelOpt::GetJitConstants(const dynamic_quantize_pa
     JitConstants jit = MakeBaseParamsJitConstants(params);
 
     auto vec_size = get_match_vector_size(params);
+    auto bf_size = get_input_bf_size(params);
+    auto total_block_num = bf_size.second / (simd * vec_size);
+    size_t aligned_block_num = (total_block_num > 32) ? Align(total_block_num, 32) : total_block_num;
+    size_t block_num = (total_block_num > 32) ? 32 : total_block_num;
 
     jit.AddConstant(MakeJitConstant("VEC_SIZE", vec_size));
     jit.AddConstant(MakeJitConstant("SIMD", simd));
+    jit.AddConstant(MakeJitConstant("TOTAL_BLOCK_NUM", total_block_num));
+    jit.AddConstant(MakeJitConstant("ALIGNED_BLOCK_NUM", aligned_block_num));
+    jit.AddConstant(MakeJitConstant("BLOCK_NUM", block_num));
     jit.Merge(GetTensorFriendlyWorkGroupsJit(params.outputs[0]));
 
     GPU_DEBUG_LOG << "DynamicQuantizeKernelOpt VEC_SIZE(" << vec_size << ") input bfyx (" << params.inputs[0].Batch().v
@@ -78,10 +85,14 @@ CommonDispatchData DynamicQuantizeKernelOpt::SetDefault(const dynamic_quantize_p
     GPU_DEBUG_GET_INSTANCE(debug_config);
     CommonDispatchData dispatchData;
 
-    // dispatchData.gws = {simd, 1, params.inputs[0].Batch().v * params.inputs[0].Feature().v};
-    auto batch = get_input_bf_size(params).first;
-    dispatchData.gws = {simd, 1, batch};
-    dispatchData.lws = {simd, 1, 1};
+    auto vec_size = get_match_vector_size(params);
+    auto bf_size = get_input_bf_size(params);
+    size_t total_block_num = bf_size.second / (simd * vec_size);
+    size_t batch = get_input_bf_size(params).first;
+    size_t block_num = (total_block_num > 32) ? 32 : total_block_num;
+
+    dispatchData.gws = {simd, block_num, batch};
+    dispatchData.lws = {simd, block_num, 1};
 
     return dispatchData;
 }
