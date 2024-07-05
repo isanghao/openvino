@@ -60,8 +60,6 @@ KERNEL(dynamic_quantize_gpu_opt)(
         grp_max = fmax(grp_max, max);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
-
     max_value = sub_group_reduce_max(grp_max);
     if (sglid == 0)
         local_mem[local_id] = max_value;
