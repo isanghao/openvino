@@ -701,7 +701,7 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
     jit.AddConstant(MakeJitConstant("REALIGN_FP16_OFFSET", realign_fp16_offset));
 
     auto activation_dt = GetActivationType(params);
-    auto accumulator_dt = GetAccumulatorType(params);
+    auto accumulator_dt = Datatype::F32; //GetAccumulatorType(params);
     jit.Merge(MakeTypeJitConstants(activation_dt, "ACTIVATION"));
     jit.Merge(MakeActivationJitConstants(params.activations, activation_dt, "_TYPED"));
     jit.Merge(MakeTypeJitConstants(accumulator_dt, "ACCUMULATOR"));

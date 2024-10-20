@@ -1083,9 +1083,9 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
             #endif
 
             // Compute input * weight : packed char4 type
-            char8 weight = vload8(0, (__local char *)(&char_slm_weight[wei_local_idx + 16*2*ki]));
-            char4 first_weight = weight.s0123;
-            char4 second_weight = weight.s4567;
+            uchar8 weight = vload8(0, (__local unsigned char *)(&char_slm_weight[wei_local_idx + 16*2*ki]));
+            uchar4 first_weight = weight.s0123;
+            uchar4 second_weight = weight.s4567;
             unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
                 char4 input_val = as_char4(_sub_group_shuffle(packed_in_0[bi / 2], (bi % 2) * 8 + ki));
                 acc_tmp[0][bi] = imad_SW(acc_tmp[0][bi], input_val, first_weight);
@@ -1134,9 +1134,9 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
                         #endif
 
                         #if COMPRESSED_WEIGHTS_INT8
-                            ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += (convert_half(((int *)(&acc_tmp[fi]))[bi]) - ((half)(wei_zp[fi]) * activation_sum[bi])) * ds * de_quantize_scale[bi];
+                            ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += (convert_float(((int *)(&acc_tmp[fi]))[bi]) - ((float)(wei_zp[fi]) * activation_sum[bi])) * ds * de_quantize_scale[bi];
                         #else
-                            ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += convert_half(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
+                            ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += convert_float(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
                         #endif
                         acc_tmp[fi][bi] = 0;
                     }
