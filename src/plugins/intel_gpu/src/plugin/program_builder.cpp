@@ -8,6 +8,7 @@
 #include "openvino/op/variadic_split.hpp"
 #include "openvino/op/lstm_cell.hpp"
 #include "openvino/op/loop.hpp"
+#include "ov_ops/dynamic_quantize.hpp"
 
 #include "intel_gpu/plugin/common_utils.hpp"
 #include "intel_gpu/plugin/program_builder.hpp"
@@ -346,6 +347,11 @@ void ProgramBuilder::add_primitive(const ov::Node& op, std::shared_ptr<cldnn::pr
 
 bool ProgramBuilder::requires_new_shape_infer(const std::shared_ptr<ov::Node>& op) const {
     if (op->is_dynamic()) {
+        return true;
+    }
+
+    if (ov::is_type<ov::op::internal::DynamicQuantize>(op)) {
+        GPU_DEBUG_LOG << "Network contains dynamic quantize. Enable new_shape_infer" << std::endl;
         return true;
     }
 
