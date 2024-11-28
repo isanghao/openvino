@@ -188,6 +188,7 @@ static void print_help_messages() {
                                 "separated by space. Support case-insensitive and regular expression. For example .*fully_connected.*");
     message_list.emplace_back("OV_GPU_DynamicQuantizeGroupSize", "Specify a group size of dynamic quantization to enable "
                               "dynamic quantization for Fully-connected primitive.");
+    message_list.emplace_back("OV_GPU_DynamicQuantizeAsym", "Enable asymmetric dynamic quantization when set as 1.");
     message_list.emplace_back("OV_GPU_DisableHorizontalFCFusion", "Disable horizontal fc fusion");
     message_list.emplace_back("OV_GPU_DumpIteration", "Dump n-th execution of network, separated by space.");
     message_list.emplace_back("OV_GPU_MemPreallocationOptions", "Controls buffer pre-allocation feature. Expects 4 values separated by space in "
@@ -256,6 +257,7 @@ debug_configuration::debug_configuration()
         , disable_fake_alignment(0)
         , use_kv_cache_compression(-1)
         , dynamic_quantize_group_size(DYNAMIC_QUANTIZE_GROUP_SIZE_NOT_SET)
+        , dynamic_quantize_asym(0)
         , disable_horizontal_fc_fusion(0) {
 #ifdef GPU_DEBUG_CONFIG
     get_gpu_debug_env_var("Help", help);
@@ -309,6 +311,7 @@ debug_configuration::debug_configuration()
     get_gpu_debug_env_var("DisableFakeAlignment", disable_fake_alignment);
     get_gpu_debug_env_var("KVCacheCompression", use_kv_cache_compression);
     get_gpu_debug_env_var("DynamicQuantizeGroupSize", dynamic_quantize_group_size);
+    get_gpu_debug_env_var("DynamicQuantizeAsym", dynamic_quantize_asym);
     get_gpu_debug_env_var("DisableHorizontalFCFusion", disable_horizontal_fc_fusion);
     std::string dump_iteration_str;
     get_gpu_debug_env_var("DumpIteration", dump_iteration_str);
