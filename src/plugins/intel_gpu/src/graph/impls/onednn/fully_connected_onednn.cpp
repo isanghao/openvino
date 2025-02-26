@@ -124,7 +124,8 @@ protected:
                 auto offset = onednn::get_offset(instance.get_input_layout(input_uncomp_idx), _pd_uncomp.dnnl::primitive_desc_base::src_desc(0));
                 // XXX: not sure whether offset argument is correctly set or not
                 auto input_mem = input->get_onednn_memory(_pd_uncomp.dnnl::primitive_desc_base::src_desc(0), offset);
-                args.insert({DNNL_ARG_SRC, input_mem});
+                args.insert_or_assign(DNNL_ARG_SRC, input_mem);
+                // std::cout << "get_argument - use uncomp_input " << instance.get_node().id() << "  size " << input->size() << std::endl;
             }
 
         }
