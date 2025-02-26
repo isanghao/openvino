@@ -26,10 +26,25 @@ struct fully_connected_onednn : typed_primitive_onednn_impl<fully_connected> {
 
     DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::onednn::fully_connected_onednn)
 
+    fully_connected_onednn(const engine& engine,
+        const ExecutionConfig& config,
+        std::shared_ptr<dnnl::primitive_attr> attrs,
+        const dnnl::primitive_desc& pd,
+        const dnnl::primitive_desc& pd_uncomp,
+        std::shared_ptr<WeightsReorderParams> weights_reorder = {})
+        : typed_primitive_onednn_impl(engine, config, attrs, pd, weights_reorder) {
+            _pd_uncomp = pd_uncomp;
+            // fixme: need to support cache
+            _prim_uncomp = dnnl::primitive(_pd_uncomp);
+        }
+
 private:
     int _ds_group_size;
     dnnl::memory::data_type _ds_data_type;
     dnnl::memory::data_type _dzp_data_type;
+    dnnl::primitive_desc _pd_uncomp;  // mingyuki: should it be private?
+    // fixme: _pd_uncomp can be empty.
+    dnnl::primitive _prim_uncomp;
 
     static std::vector<int64_t> reshape_to_2d(const ov::PartialShape& shape, int64_t feature) {
         auto staticShape = shape.to_shape();
@@ -40,12 +55,16 @@ private:
     }
 
 protected:
+
     std::unique_ptr<primitive_impl> clone() const override {
         return std::make_unique<fully_connected_onednn>(*this);
     }
 
     std::unordered_map<int, dnnl::memory> get_arguments(fully_connected_inst& instance) const override {
         std::unordered_map<int, dnnl::memory> args = parent::get_arguments(instance);
+        auto layout = instance.output_memory(0).get_layout();
+        // fixme: need to narrow the condition to avoid uncompress. It should be only 3d(?) and 4bit-weight
+        // std::cout << "get_argument - layout " << layout.batch() << std::endl;
 
         {
             auto weights = instance.weights_memory();
@@ -131,12 +150,16 @@ protected:
                                         cldnn::engine& engine,
                                         size_t prim_input_size,
                                         bool has_bias,
-                                        const dnnl::primitive_attr& attr = dnnl::primitive_attr()) {
+                                        const dnnl::primitive_attr& attr = dnnl::primitive_attr(),
+                                        bool is_input_uncomp = false) {
         auto input_layout = impl_params.get_input_layout(0);
         auto weights_layout = impl_params.get_input_layout(1);
         auto output_layout = impl_params.get_output_layout();
 
         transform_layouts(input_layout, weights_layout, output_layout, prim_input_size);
+        if (is_input_uncomp) {
+            input_layout.data_type = ov::element::f16;
+        }
 
         auto input_md = onednn::layout_to_memory_desc(input_layout, dnnl::memory::format_tag::ab, false);
         // TODO: should change format to any. May need a reorder.
@@ -325,6 +348,14 @@ public:
                 }
             }
 
+            std::shared_ptr<dnnl::matmul::primitive_desc> prim_desc_uncomp(new dnnl::matmul::primitive_desc);
+            if (prim->input_uncomp.is_valid()) {
+                prim_desc_uncomp = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
+                                                                prim->input_size, !prim->bias.empty(), *attr, true);
+
+            }
+
+
             if (prim->dynamic_quantized_activation) {
                 auto src_scale_idx = ++idx;
                 auto& partial_shape = impl_params.input_layouts[0].get_partial_shape();
@@ -340,11 +371,11 @@ public:
                     attr->set_zero_points(DNNL_ARG_SRC, GROUPED, dnnl::memory::dims{1, src_group_size}, dnnl::memory::data_type::u8);
             }
 
-
+            
             auto prim_desc = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
-                                                             prim->input_size, !prim->bias.empty(), *attr);
+                                                            prim->input_size, !prim->bias.empty(), *attr);
 
-            auto prim_onednn = std::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc);
+            auto prim_onednn = std::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc, *prim_desc_uncomp);
             prim_onednn->_ds_group_size = group_size;
             prim_onednn->_ds_data_type = ds_data_type;
             prim_onednn->_dzp_data_type = dzp_data_type;
