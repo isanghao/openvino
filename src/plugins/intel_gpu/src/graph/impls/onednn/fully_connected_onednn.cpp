@@ -8,6 +8,7 @@
 #include "intel_gpu/runtime/utils.hpp"
 #include "primitive_onednn_base.h"
 #include "impls/registry/implementation_manager.hpp"
+#include "intel_gpu/primitives/dynamic_quantize.hpp"
 
 #include <oneapi/dnnl/dnnl.hpp>
 
@@ -26,25 +27,29 @@ struct fully_connected_onednn : typed_primitive_onednn_impl<fully_connected> {
 
     DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::onednn::fully_connected_onednn)
 
-    fully_connected_onednn(const engine& engine,
-        const ExecutionConfig& config,
-        std::shared_ptr<dnnl::primitive_attr> attrs,
-        const dnnl::primitive_desc& pd,
-        const dnnl::primitive_desc& pd_uncomp,
-        std::shared_ptr<WeightsReorderParams> weights_reorder = {})
-        : typed_primitive_onednn_impl(engine, config, attrs, pd, weights_reorder) {
-            _pd_uncomp = pd_uncomp;
-            // fixme: need to support cache
-            _prim_uncomp = dnnl::primitive(_pd_uncomp);
-        }
+    // FIXME: can we hide pd_uncomp into FC onednn.cpp only?
+
+    // fully_connected_onednn(const engine& engine,
+    //     const ExecutionConfig& config,
+    //     std::shared_ptr<dnnl::primitive_attr> attrs,
+    //     const dnnl::primitive_desc& pd,
+    //     const dnnl::primitive_desc& pd_uncomp,
+    //     bool has_uncomp_input = false,
+    //     std::shared_ptr<WeightsReorderParams> weights_reorder = {})
+    //     : typed_primitive_onednn_impl(engine, config, attrs, pd, weights_reorder),
+    //       _pd_uncomp(pd_uncomp),
+    //       _has_uncomp_input(has_uncomp_input) {
+    //         if (has_uncomp_input)
+    //             std::cout << "has_uncomp_input = 1" << std::endl;
+
+    //         // fixme: need to support cache
+    //         _prim_uncomp = dnnl::primitive(_pd_uncomp);
+    //     }
 
 private:
     int _ds_group_size;
     dnnl::memory::data_type _ds_data_type;
     dnnl::memory::data_type _dzp_data_type;
-    dnnl::primitive_desc _pd_uncomp;  // mingyuki: should it be private?
-    // fixme: _pd_uncomp can be empty.
-    dnnl::primitive _prim_uncomp;
 
     static std::vector<int64_t> reshape_to_2d(const ov::PartialShape& shape, int64_t feature) {
         auto staticShape = shape.to_shape();
@@ -63,9 +68,6 @@ protected:
     std::unordered_map<int, dnnl::memory> get_arguments(fully_connected_inst& instance) const override {
         std::unordered_map<int, dnnl::memory> args = parent::get_arguments(instance);
         auto layout = instance.output_memory(0).get_layout();
-        // fixme: need to narrow the condition to avoid uncompress. It should be only 3d(?) and 4bit-weight
-        // std::cout << "get_argument - layout " << layout.batch() << std::endl;
-
         {
             auto weights = instance.weights_memory();
             auto offset = onednn::get_offset(instance.get_input_layout(1), _pd.dnnl::primitive_desc_base::weights_desc(0));
@@ -112,6 +114,19 @@ protected:
                 dnnl::memory::desc desc = onednn::layout_to_memory_desc(act_zp_mem->get_layout(), dnnl::memory::format_tag::ab, true);
                 args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC_0, act_zp_mem->get_onednn_memory(desc)});
             }
+            // fixme: need to narrow the condition to avoid uncompress. It should be only 3d(?) and 4bit-weight
+            // std::cout << "get_argument - layout " << layout.batch() << std::endl;
+            if (layout.batch() == 1 && _has_uncomp_input) {
+                // std::cout << "get_argument - layout " << layout << "  " << instance.get_node().id() << std::endl;
+                // overwrite input buffer to uncompressed version
+                auto input_uncomp_idx = idx++;
+                auto input = instance.dep_memory_ptr(input_uncomp_idx);
+                auto offset = onednn::get_offset(instance.get_input_layout(input_uncomp_idx), _pd_uncomp.dnnl::primitive_desc_base::src_desc(0));
+                // XXX: not sure whether offset argument is correctly set or not
+                auto input_mem = input->get_onednn_memory(_pd_uncomp.dnnl::primitive_desc_base::src_desc(0), offset);
+                args.insert({DNNL_ARG_SRC, input_mem});
+            }
+
         }
 
         return args;
@@ -159,6 +174,7 @@ protected:
         transform_layouts(input_layout, weights_layout, output_layout, prim_input_size);
         if (is_input_uncomp) {
             input_layout.data_type = ov::element::f16;
+            // fixme: it may be f32 depending on the network
         }
 
         auto input_md = onednn::layout_to_memory_desc(input_layout, dnnl::memory::format_tag::ab, false);
@@ -299,6 +315,16 @@ public:
 #endif
     }
 
+    void execute_prim(const dnnl::stream& stream, const std::unordered_map<int, dnnl::memory> &args) {
+        // std::cout << "FC execute_prim is called" << std::endl;
+        if (_has_uncomp_input) {
+            // std::cout << "execute_prim: uncompressed primitive is executed" << std::endl;
+            _prim_uncomp.execute(stream, args);
+        } else {
+            _prim.execute(stream, args);
+        }
+    }
+
     static std::unique_ptr<primitive_impl> create(const fully_connected_node& arg, const kernel_impl_params& impl_params) {
         auto& engine = impl_params.prog->get_engine();
         auto& config = impl_params.prog->get_config();
@@ -349,10 +375,13 @@ public:
             }
 
             std::shared_ptr<dnnl::matmul::primitive_desc> prim_desc_uncomp(new dnnl::matmul::primitive_desc);
-            if (prim->input_uncomp.is_valid()) {
+            bool is_node_dyn_quantized = false;
+            if (prim->input_uncomp.is_valid() && arg.get_dependency(0).is_type<dynamic_quantize>() && is_four_bit_weight) {
+                // std::cout << "input_uncomp is valid" << std::endl;
+                // std::cout << "is_dependency dynamic_quantize " << arg.get_dependency(0).is_type<dynamic_quantize>() << std::endl;
+                is_node_dyn_quantized = true;
                 prim_desc_uncomp = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
                                                                 prim->input_size, !prim->bias.empty(), *attr, true);
-
             }
 
 
@@ -375,7 +404,8 @@ public:
             auto prim_desc = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
                                                             prim->input_size, !prim->bias.empty(), *attr);
 
-            auto prim_onednn = std::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc, *prim_desc_uncomp);
+            auto prim_onednn = std::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc, std::shared_ptr<WeightsReorderParams>{}, *prim_desc_uncomp, is_node_dyn_quantized);
+            // auto prim_onednn = std::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc, std::shared_ptr<WeightsReorderParams>{}, *prim_desc_uncomp);
             prim_onednn->_ds_group_size = group_size;
             prim_onednn->_ds_data_type = ds_data_type;
             prim_onednn->_dzp_data_type = dzp_data_type;
