@@ -25,7 +25,7 @@ using FullyConnectedCompressed = ov::intel_gpu::op::FullyConnectedCompressed;
 namespace ov::intel_gpu {
 
 static void CreateFullyConnectedCompressedOp(ProgramBuilder& p, const std::shared_ptr<op::FullyConnectedCompressed>& op) {
-    validate_inputs_count(op, {4, 5, 6, 7});
+    validate_inputs_count(op, {4, 5, 6, 8});
     auto inputs = p.GetInputInfo(op);
     std::string primitive_name = layer_type_name_ID(op);
     auto supports_immad = p.get_engine().get_device_info().supports_immad;
