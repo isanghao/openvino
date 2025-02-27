@@ -1168,8 +1168,9 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
                     return true;
                 }
 
+                char *ptr = getenv("AVOID_2ND");
                 // Do not apply dyn_quan for 8bit-weight layers because it has currently issue with 2nd-token-no-dyn-quan
-                GPU_DEBUG_IF((root->get_input_element_type(1) == ov::element::i8 || root->get_input_element_type(1) == ov::element::u8)) {
+                GPU_DEBUG_IF(ptr && (root->get_input_element_type(1) == ov::element::i8 || root->get_input_element_type(1) == ov::element::u8)) {
                     GPU_DEBUG_TRACE << root->get_friendly_name() << "  dyn_quan is turned off: asym quantization does not support 8bit weight" << std::endl;
                     return true;
                 }

@@ -43,6 +43,7 @@ struct typed_primitive_onednn_impl : public typed_primitive_impl<PType> {
     // fixme: change data type
     dnnl::primitive _prim_uncomp;
     bool _has_uncomp_input = false;   // rename to has_input_uncomp
+    mutable bool _use_input_uncomp = false;
 
     typed_primitive_onednn_impl(const engine& engine,
             const ExecutionConfig& config,
@@ -553,11 +554,13 @@ protected:
 
         if (!instance.can_be_optimized()) {
             try {
-                if (_has_uncomp_input && instance.output_memory(0).get_layout().batch() == 1) {
-                    // std::cout << "execute_prim: uncompressed primitive is executed" << std::endl;
+                if (_use_input_uncomp) {
+                    // auto l = instance.output_memory(0).get_layout();
+                    // std::cout << "execute_prim: uncompressed primitive is executed - format " << l.format << " - " << l.batch() << "x" << l.feature() << std::endl;
                     _prim_uncomp.execute(stream.get_onednn_stream(), _args[net_id]);
                 } else {
-                    // std::cout << "execute_prim: compressed primitive is executed" << std::endl;
+                    // auto l = instance.output_memory(0).get_layout();
+                    // std::cout << "execute_prim: compressed primitive is executed - format " << l.format << " - " << l.batch() << "x" << l.feature() << std::endl;
                     _prim.execute(stream.get_onednn_stream(), _args[net_id]);
                 }
                     } catch (dnnl::error& err) {

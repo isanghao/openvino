@@ -109,10 +109,12 @@ void DynamicQuantizeKernelOpt::GetUpdateDispatchDataFunc(KernelData& kd) const {
         kd.kernels[0].params.workGroups.local = dispatchData.lws;
 
         kd.kernels[0].skip_execution = false;
-        const auto& dq_params = static_cast<const dynamic_quantize_params&>(params);
-        auto bf_size = get_input_bf_size(dq_params);
-        // std::cout << "bf_size " << bf_size.first << " - " << bf_size.second << std::endl;
-        kd.kernels[0].skip_execution = bf_size.first == 1;
+        // const auto& dq_params = static_cast<const dynamic_quantize_params&>(params);
+        // auto bf_size = get_input_bf_size(dq_params);
+        // char *ptr = getenv("AVOID_2ND");
+        // if (ptr)
+        //     kd.kernels[0].skip_execution = bf_size.first == 1;
+        // std::cout << "skip_execution: " << kd.kernels[0].skip_execution << std::endl;
 
         GPU_DEBUG_TRACE_DETAIL << "Update Dispatch data DynamicQuantizeKernelOpt gws : " << dispatchData.gws[0] << ", "
                 << dispatchData.gws[1] << ", " << dispatchData.gws[2] << std::endl;
