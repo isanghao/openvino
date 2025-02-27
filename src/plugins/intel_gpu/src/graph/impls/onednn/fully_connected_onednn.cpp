@@ -387,7 +387,7 @@ public:
             bool is_node_dyn_quantized = false;
             // std::cout << __func__ << "  : " << arg.id() << "  " << prim->input_uncomp.is_valid() << "  " << arg.get_dependency(0).is_type<dynamic_quantize>() << "  " << is_four_bit_weight << "  " << !!ptr << std::endl;
             // std::cout << "   " << prim->input_uncomp.pid << std::endl;
-            if (prim->input_uncomp.is_valid() && arg.get_dependency(0).is_type<dynamic_quantize>() && is_four_bit_weight && ptr) {
+            if (prim->input_uncomp.is_valid() && arg.get_dependency(0).is_type<dynamic_quantize>() && ptr) {
                 // std::cout << "Apply uncomp_input to: " << arg.id() << std::endl;
                 is_node_dyn_quantized = true;
                 prim_desc_uncomp = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
