@@ -343,11 +343,13 @@ public:
         dnnl::memory::data_type dzp_data_type = dnnl::memory::data_type::undef;
         bool is_four_bit_weight = false;
         int idx = !arg.bias_term() ? 1 : 2;
-
+        auto attr_uncomp = std::make_shared<dnnl::primitive_attr>();
+        
         // There may be a performance difference between InnerProduct and MatMul primitives in oneDNN,
         // so use MatMul only for weights compression and IP for all other cases.
         if (prim->compressed_weights) {
             attr->set_fpmath_mode(dnnl::fpmath_mode::f16, true);
+            attr_uncomp->set_fpmath_mode(dnnl::fpmath_mode::f16, true);
             auto weights_layout = impl_params.get_input_layout(1);
             is_four_bit_weight = weights_layout.data_type == data_types::u4 || weights_layout.data_type == data_types::i4;
             if (!prim->decompression_scale.empty()) {
@@ -359,9 +361,11 @@ public:
                 if (!is_four_bit_weight) {
                     // 8-bit quantized weight
                     attr->set_scales(DNNL_ARG_WEIGHTS, PER_OC, dnnl::memory::dims{}, ds_data_type);
+                    attr_uncomp->set_scales(DNNL_ARG_WEIGHTS, PER_OC, dnnl::memory::dims{}, ds_data_type);
                 } else {
                     // OneDNN does not support scalar zero-point for s4 and u8 type. Need to broadcast it.
                     attr->set_scales(DNNL_ARG_WEIGHTS, GROUPED, {group_size, 1}, ds_data_type);
+                    attr_uncomp->set_scales(DNNL_ARG_WEIGHTS, GROUPED, {group_size, 1}, ds_data_type);
                 }
             }
 
@@ -372,12 +376,15 @@ public:
 
                 if (dzp_layout.count() == 1) {
                     attr->set_zero_points(DNNL_ARG_WEIGHTS, COMMON, dnnl::memory::dims{}, dzp_data_type);
+                    attr_uncomp->set_zero_points(DNNL_ARG_WEIGHTS, COMMON, dnnl::memory::dims{}, dzp_data_type);
                 } else {
                     auto ngroups = dzp_layout.get_dim(1);
                     if (ngroups == 1) {
                         attr->set_zero_points(DNNL_ARG_WEIGHTS, PER_OC, dnnl::memory::dims{}, dzp_data_type);
+                        attr_uncomp->set_zero_points(DNNL_ARG_WEIGHTS, PER_OC, dnnl::memory::dims{}, dzp_data_type);
                     } else {
                         attr->set_zero_points(DNNL_ARG_WEIGHTS, GROUPED, {group_size, 1}, dzp_data_type);
+                        attr_uncomp->set_zero_points(DNNL_ARG_WEIGHTS, GROUPED, {group_size, 1}, dzp_data_type);
                     }
                 }
             }
@@ -390,8 +397,11 @@ public:
             if (prim->input_uncomp.is_valid() && arg.get_dependency(0).is_type<dynamic_quantize>() && !ptr) {
                 // std::cout << "Apply uncomp_input to: " << arg.id() << std::endl;
                 is_node_dyn_quantized = true;
+                // attr->set_scales(DNNL_ARG_SRC, 0, dnnl::memory::dims{});
+                attr_uncomp->set_post_ops(attr->get_post_ops());
+                attr_uncomp->set_scratchpad_mode(dnnl::scratchpad_mode::user);        
                 prim_desc_uncomp = get_matmul_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
-                                                                prim->input_size, !prim->bias.empty(), *attr, true);
+                                                                prim->input_size, !prim->bias.empty(), *attr_uncomp, true);
             }
 
 
