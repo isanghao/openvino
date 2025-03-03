@@ -1332,8 +1332,8 @@ void primitive_inst::do_runtime_skip_dynamic_quantize() {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, openvino::itt::handle("do_runtime_skip_dynamic_quantize: " + id()));
     if (!_node->is_type<dynamic_quantize>())
         return;
-    char *ptr = getenv("AVOID_2ND");
-    if (!ptr)
+    char *ptr = getenv("DYN_QUAN_2ND");
+    if (ptr)
         return;
 
     set_can_be_optimized(false);
