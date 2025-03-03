@@ -355,12 +355,12 @@ private:
         if (!config.get_allow_new_shape_infer()) {
             cache_outpath = "";
         }
-
+        // FIXME: prim_uncomp should support cache too
+        if (_has_uncomp_input)
+            _prim_uncomp = PrimType(_pd_uncomp);
+        
         if (cache_outpath.empty()) {
             _prim = PrimType(_pd);
-            // FIXME: prim_uncomp should support cache too
-            if (_has_uncomp_input)
-                _prim_uncomp = PrimType(_pd_uncomp);
         } else {
             std::vector<uint8_t> key = _pd.get_cache_blob_id();
             assert(!key.empty());
