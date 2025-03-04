@@ -1352,7 +1352,7 @@ void primitive_inst::do_runtime_skip_dynamic_quantize() {
                                << "  can_be_optimized - " << get_node().id() << " - " << _impl_params->output_layouts[0].get_shape() << std::endl;
         set_can_be_optimized(true);
 
-        OPENVINO_ASSERT(get_user_insts().size() == 2, "Dynamic quantization is supposed to have only one user with two connections: ", get_node().id());
+        OPENVINO_ASSERT(get_user_insts().size() == _node->get_outputs_count(), "Dynamic quantization is supposed to have only one user-node with duplicated connection: ", get_node().id());
         OPENVINO_ASSERT(get_user_insts()[0]->get_node().is_type<fully_connected>(), "Use of dynamic quantization should be fully_connected: ", get_node().id());
     }
 }
