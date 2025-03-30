@@ -282,7 +282,7 @@ KERNEL(gemm_tiled_opt)(
                 b_tile[b_load_id] = b_raw_global_id > N - 1 ? 0 : b_ptr[sglid];
                 #else // B_VEC_SIZE == 1
                     if (TILE_N_NOT_DIVISIBLE == 0 || N_IS_ALIGNED_4BYTE)
-                        b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
+                        b_tile[b_load_id] = convert_float2(BLOCK_READ_B(b_ptr, 0));
                     else {
                         unroll_for (uint b_elem = 0; b_elem < B_VEC_SIZE; ++b_elem) {
                             b_tile[b_load_id][b_elem] = b_ptr[sglid + SIMD_WIDTH * b_elem];
@@ -517,7 +517,7 @@ KERNEL(gemm_tiled_opt)(
                     b_tile[b_load_id] = b_raw_global_id > N - 1 ? 0 : b_ptr[sglid];
                 #else // B_VEC_SIZE == 1
                     if (TILE_N_NOT_DIVISIBLE == 0 || N_IS_ALIGNED_4BYTE)
-                        b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
+                        b_tile[b_load_id] = convert_float2(BLOCK_READ_B(b_ptr, 0));
                     else {
                         unroll_for (uint b_elem = 0; b_elem < B_VEC_SIZE; ++b_elem) {
                             b_tile[b_load_id][b_elem] = b_ptr[sglid + SIMD_WIDTH * b_elem];
@@ -743,7 +743,7 @@ KERNEL(gemm_tiled_opt)(
         #ifdef BIAS_TERM
         ACCUMULATOR_TYPE_VEC dequantized = (ACCUMULATOR_TYPE_VEC)(ALPHA) * c_tile[write_id] + TO_ACCUMULATOR_TYPE(BETA) * c_ptr[sglid];
         #else // BIAS_TERM
-        ACCUMULATOR_TYPE_VEC dequantized = (ACCUMULATOR_TYPE_VEC)(ALPHA) * c_tile[write_id];
+        ACCUMULATOR_TYPE_VEC dequantized = convert_float2((ACCUMULATOR_TYPE_VEC)(ALPHA)) * c_tile[write_id];
         #endif // BIAS_TERM
 
         #if HAS_FUSED_OPS

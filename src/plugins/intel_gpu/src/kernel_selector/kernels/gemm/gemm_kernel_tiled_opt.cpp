@@ -304,15 +304,15 @@ JitConstants GemmKernelTiledOpt::GetJitConstants(const gemm_params& params) cons
     if (tuning_data.tile_n_size > tuning_data.simd_size) {
         jit.AddConstants({
             MakeJitConstant("B_VEC_SIZE", b_vec_size),
-            MakeJitConstant("B_FLOATN", std::string("CAT(INPUT1_TYPE, ") + toCodeString(b_vec_size) + ")"),
+            MakeJitConstant("B_FLOATN", std::string("CAT(float, ") + toCodeString(b_vec_size) + ")"),
             MakeJitConstant("OUTPUT_TYPE_VEC", std::string("CAT(OUTPUT_TYPE, ") + toCodeString(b_vec_size) + ")"),
-            MakeJitConstant("ACCUMULATOR_TYPE_VEC", std::string("CAT(ACCUMULATOR_TYPE, ") + toCodeString(b_vec_size) + ")"),
+            MakeJitConstant("ACCUMULATOR_TYPE_VEC", std::string("CAT(float, ") + toCodeString(b_vec_size) + ")"),
         });
     } else {
         b_vec_size = 1;
         jit.AddConstants({
             MakeJitConstant("B_VEC_SIZE", b_vec_size),
-            MakeJitConstant("B_FLOATN", std::string("INPUT1_TYPE")),
+            MakeJitConstant("B_FLOATN", std::string("float")),
             MakeJitConstant("OUTPUT_TYPE_VEC", std::string("OUTPUT_TYPE")),
             MakeJitConstant("ACCUMULATOR_TYPE_VEC", std::string("ACCUMULATOR_TYPE")),
         });
