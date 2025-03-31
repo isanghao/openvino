@@ -8,6 +8,7 @@
 #include "include/batch_headers/sub_group_block_write.cl"
 #include "include/batch_headers/sub_group_shuffle.cl"
 
+#define my_mad(a,b,c) ((a) * (b) + (c))
 #if INPUT0_TYPE_SIZE == 4
 #define BLOCK_SHUFFLE               _sub_group_shuffle
 #else // INPUT0_TYPE_SIZE == 4
@@ -416,7 +417,7 @@ KERNEL(gemm_tiled_opt)(
             unroll_for (uint subtile_k_id = 0; subtile_k_id < TILE_K / SIMD_WIDTH; subtile_k_id++) {
                 unroll_for (uint simd_local_id = 0; simd_local_id < SIMD_WIDTH; simd_local_id++) {
     #if TILE_K > SIMD_WIDTH
-                    c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_read[subtile_k_id], simd_local_id)),
+                    c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_read[subtile_k_id], simd_local_id)),
                                          b_tile[subtile_k_id * SIMD_WIDTH + simd_local_id], c_tile[dot_id]);
     #else // TILE_K > SIMD_WIDTH
                 #if B_VEC_SIZE > 1 && TRANSPOSE_INPUT1 == TRANSPOSE_Y_LAST
@@ -424,9 +425,9 @@ KERNEL(gemm_tiled_opt)(
                     unroll_for (uint b_elem = 0; b_elem < B_VEC_SIZE; ++b_elem) {
                         b_tile_tmp[b_elem] = b_tile[b_elem][simd_local_id];
                     }
-                    c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_read, simd_local_id)), b_tile_tmp, c_tile[dot_id]);
+                    c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_read, simd_local_id)), b_tile_tmp, c_tile[dot_id]);
                 #else
-                    c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_read, simd_local_id)), b_tile[simd_local_id], c_tile[dot_id]);
+                    c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_read, simd_local_id)), b_tile[simd_local_id], c_tile[dot_id]);
                 #endif
     #endif // TILE_K > SIMD_WIDTH
                 }
@@ -468,9 +469,9 @@ KERNEL(gemm_tiled_opt)(
                 unroll_for (uint b_elem = 0; b_elem < B_VEC_SIZE; ++b_elem) {
                     b_tile_tmp[b_elem] = b_tile[b_elem][simd_local_id];
                 }
-                c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_tile[dot_id], simd_local_id)), b_tile_tmp, c_tile[dot_id]);
+                c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_tile[dot_id], simd_local_id)), b_tile_tmp, c_tile[dot_id]);
             #else
-                c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_tile[dot_id], simd_local_id)), b_tile[simd_local_id], c_tile[dot_id]);
+                c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_tile[dot_id], simd_local_id)), b_tile[simd_local_id], c_tile[dot_id]);
             #endif
             }
         } // Tile C calculation for TN, TT cases end
@@ -595,12 +596,12 @@ KERNEL(gemm_tiled_opt)(
             #if B_VEC_SIZE > 1
                 #if TRANSPOSE_INPUT1 == TRANSPOSE_Y_LAST
                 MAKE_VECTOR_TYPE(INPUT1_TYPE, B_VEC_SIZE) b_tile_tmp = {b_tile[0][simd_id], b_tile[1][simd_id]};
-                c_tile[dot_id] = mad((INPUT0_TYPE)sub_group_broadcast(a_read, simd_id), b_tile_tmp, c_tile[dot_id]);
+                c_tile[dot_id] = my_mad((float)sub_group_broadcast(a_read, simd_id), b_tile_tmp, c_tile[dot_id]);
                 #else
-                c_tile[dot_id] = mad((INPUT0_TYPE)sub_group_broadcast(a_read, simd_id), b_tile[simd_id], c_tile[dot_id]);
+                c_tile[dot_id] = my_mad((float)sub_group_broadcast(a_read, simd_id), b_tile[simd_id], c_tile[dot_id]);
                 #endif
             #else
-                c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_read, simd_id)), b_tile[simd_id], c_tile[dot_id]);
+                c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_read, simd_id)), b_tile[simd_id], c_tile[dot_id]);
             #endif
             }
         } // Loading leftovers of the matrix A and tile C calculation end
@@ -688,7 +689,7 @@ KERNEL(gemm_tiled_opt)(
 #endif
 #endif // INDIRECT_INPUT0
         unroll_for (uint simd_id = 0; simd_id < TILE_K_LEFTOVER; simd_id++) {
-            c_tile[dot_id] = mad((INPUT0_TYPE)(sub_group_broadcast(a_read, simd_id)), b_tile[simd_id], c_tile[dot_id]);
+            c_tile[dot_id] = my_mad((float)(sub_group_broadcast(a_read, simd_id)), b_tile[simd_id], c_tile[dot_id]);
         }
     } // Loading leftovers of the matrix A and tile C calculation end
 #endif // IS_DYNAMIC
