@@ -210,6 +210,7 @@ Datatype FullyConnectedKernelBase::GetAccumulatorType(const fully_connected_para
     if ((quantized_inputs || quantized_weights) && !params.compressed)
         return Datatype::F32;
 
+    return Datatype::F32;
     return in_dt;
 }
 
