@@ -14,6 +14,10 @@
 namespace cldnn {
 namespace onednn {
 
+#define LOG_AND_RETURN() do {   \
+    GPU_DEBUG_COUT << "do not use onednn" << std::endl; \
+    return false;   \
+} while(0)
 struct FullyConnectedImplementationManager : public ImplementationManager {
     OV_GPU_PRIMITIVE_IMPL("onednn::fc")
     FullyConnectedImplementationManager(shape_types shape_type) : ImplementationManager(impl_types::onednn, shape_type) {}
@@ -24,7 +28,7 @@ struct FullyConnectedImplementationManager : public ImplementationManager {
         const auto& config = node.get_program().get_config();
         const auto& info = node.get_program().get_engine().get_device_info();
         if (!info.supports_immad || info.arch == gpu_arch::unknown || !config.get_use_onednn())
-            return false;
+            LOG_AND_RETURN();
 
         const auto& fc_node = node.as<fully_connected>();
         const auto& in_layout = fc_node.get_input_layout(0);
@@ -35,16 +39,16 @@ struct FullyConnectedImplementationManager : public ImplementationManager {
         auto fc_prim = fc_node.get_primitive();
 
         if (one_of(data_types::i64, {in0_dt, wei_dt}))
-            return false;
+            LOG_AND_RETURN();
 
         if (!everyone_is(format::bfyx, in_layout.format, out_layout.format) &&
             !everyone_is(format::bfzyx, in_layout.format, out_layout.format) &&
             !everyone_is(format::bfwzyx, in_layout.format, out_layout.format) &&
             !everyone_is(format::any, in_layout.format, out_layout.format))
-            return false;
+            LOG_AND_RETURN();
 
         if (!is_supported_pad(in_layout) || !is_supported_pad(out_layout))
-            return false;
+            LOG_AND_RETURN();
 
         bool f16f16_case = everyone_is(data_types::f16, in0_dt, wei_dt) && one_of(out_dt, {data_types::f16, data_types::f32, data_types::i8});
         bool f32f32_case = everyone_is(data_types::f32, in0_dt, wei_dt);
@@ -56,7 +60,7 @@ struct FullyConnectedImplementationManager : public ImplementationManager {
                                one_of(wei_dt, {data_types::u8, data_types::i8, data_types::u4, data_types::i4}) &&
                                one_of(out_dt, {data_types::f16, data_types::f32, data_types::u8, data_types::i8});
         if (!f16f16_case && !f32f32_case && !u8s8_case && !compressed_case)
-            return false;
+            LOG_AND_RETURN();
 
         if (fc_prim->compressed_weights) {
             if (!fc_prim->decompression_zero_point.empty()) {
@@ -64,7 +68,7 @@ struct FullyConnectedImplementationManager : public ImplementationManager {
                 auto decompression_zp_dt = fc_node.get_input_layout(decompression_zp_idx).data_type;
                 if ((wei_dt != ov::element::Type_t::u4 && wei_dt != ov::element::Type_t::u8) ||
                     (decompression_zp_dt != ov::element::Type_t::u8 && decompression_zp_dt != ov::element::Type_t::i8)) {
-                    return false;
+                    LOG_AND_RETURN();
                 }
             }
         }
