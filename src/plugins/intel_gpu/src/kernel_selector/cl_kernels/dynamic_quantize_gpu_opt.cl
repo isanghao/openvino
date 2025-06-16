@@ -79,6 +79,10 @@ KERNEL(dynamic_quantize_gpu_opt)(
 #elif DYNAMIC_QUANTIZAION_IMPL_MODE == MODE_LARGE_GS
 // ***********************************************
 
+#if ASYMMETRIC_QUANTIZATION != 0 && GENERATE_PARTIAL_SUM != 0
+#error "UNIMPLMENTED: asymmetric quantization with partial_sum generation"
+#endif
+
 REQD_SUB_GROUP_SIZE(SIMD)
 KERNEL(dynamic_quantize_gpu_opt)(
     OPTIONAL_SHAPE_INFO_ARG
@@ -87,6 +91,9 @@ KERNEL(dynamic_quantize_gpu_opt)(
     __global OUTPUT1_TYPE* output_scale
 #if ASYMMETRIC_QUANTIZATION
     , __global OUTPUT2_TYPE* output_zp
+#endif
+#if GENERATE_PARTIAL_SUM
+    , __global OUTPUT2_TYPE* output_partial_sum
 #endif
     )
 {

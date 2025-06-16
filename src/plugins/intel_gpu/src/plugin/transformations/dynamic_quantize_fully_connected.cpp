@@ -61,9 +61,12 @@ DynamicQuantizeFullyConnected::DynamicQuantizeFullyConnected(uint64_t group_size
             config.zp_dt = element::u8; // it supports u8 only now
         }
 
-        if (asymmetric && group_size != UINT64_MAX && group_size > 0) {
+        if (group_size != UINT64_MAX && group_size > 0) {
             // FIXME: it should be aligned with wei-zp group size
-            config.group_sizes_partial_sum.back() = {group_size};
+            // FIXME: weight should have ZP
+            std::vector<uint64_t> group_sizes_partial_sum(rank, 1);
+            group_sizes_partial_sum.back() = group_size;
+            config.group_sizes_partial_sum = group_sizes_partial_sum;
             config.partial_sum_dt = element::f16;
         }
 
