@@ -20,6 +20,10 @@
 #if DYNAMIC_QUANTIZAION_IMPL_MODE == MODE_SMALL_GS
 // ***********************************************
 
+#if GENERATE_PARTIAL_SUM != 0
+#error "UNIMPLMENTED: partial_sum generation"
+#endif
+
 #if ASYMMETRIC_QUANTIZATION
 #error "UNIMPLMENTED: asymmetric quantization when group size is small"
 #endif
@@ -126,7 +130,9 @@ KERNEL(dynamic_quantize_gpu_opt)(
     half grp_min = 0.001h;
     half max_value = 0.0h;
     half min_value = 0.0h;
-
+#if GENERATE_PARTIAL_SUM
+    half partial_sum = 0.0h;
+#endif
     val = AS_INPUT_TYPE_N(VLOAD_N(0, input + input_offset + (local_id * block_size)));
 
 #if ASYMMETRIC_QUANTIZATION
@@ -139,8 +145,12 @@ KERNEL(dynamic_quantize_gpu_opt)(
 #else
     abs_val = fabs(val);
 
-    unroll_for (int j = 0; j < VEC_SIZE; j++)
+    unroll_for (int j = 0; j < VEC_SIZE; j++) {
         max_value = fmax(max_value, abs_val[j]);
+#if GENERATE_PARTIAL_SUM
+        partial_sum += val[j];
+#endif
+    }
 
     grp_max = fmax(grp_max, max_value);
 #endif
@@ -148,6 +158,9 @@ KERNEL(dynamic_quantize_gpu_opt)(
     max_value = sub_group_reduce_max(grp_max);
 #if ASYMMETRIC_QUANTIZATION
     min_value = sub_group_reduce_min(grp_min);
+#endif
+#if GENERATE_PARTIAL_SUM
+    partial_sum = sub_group_reduce_add(partial_sum);
 #endif
 
     if (sglid == 0) {
@@ -192,12 +205,21 @@ KERNEL(dynamic_quantize_gpu_opt)(
 #if ASYMMETRIC_QUANTIZATION
         output_zp[output_idx] = convert_uchar_rte(zp);
 #endif
+#if GENERATE_PARTIAL_SUM
+        // FIXME: f_grp may not be aligned with dyn_quan gs
+        // XXX: can partial_sum be f16? this may go out of range for large group size
+        output_partial_sum[output_idx] = partial_sum;
+#endif
     }
 }
 
 // ***********************************************
 #elif DYNAMIC_QUANTIZAION_IMPL_MODE == MODE_PER_TOKEN
 // ***********************************************
+
+#if GENERATE_PARTIAL_SUM != 0
+#error "UNIMPLMENTED: partial_sum generation"
+#endif
 
 REQD_SUB_GROUP_SIZE(SIMD)
 KERNEL(dynamic_quantize_gpu_opt)(
