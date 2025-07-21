@@ -270,10 +270,27 @@ bool convert_function_precision(ov::pass::PassBase& pass,
     // Register internal constants only after fixing input type that could lead to nodes
     // replacement
     register_constants(ops);
+
     for (auto& node : ops) {
         // skip precision sensitive nodes
         if (skip_precision_sensitive && fp16_compression_is_disabled(node) && has_fp16_compression)
             continue;
+
+        if (node->get_type_info() == ov::op::v1::Maximum::get_type_info_static()
+            || node->get_type_info() == ov::op::v1::Minimum::get_type_info_static()) {
+            std::cout << "clamp node: " << node->get_friendly_name() << " type: "
+                      << node->get_type_info().name << " output type: " << node->get_output_element_type(0)
+                      << std::endl;
+            continue;
+        }
+
+        // bool is_conv = !!ov::as_type_ptr<ov::op::v1::Convolution>(node);
+        // if (node->get_output_element_type(0) == ov::element::bf16 && is_conv) {
+        //     std::cout << __LINE__ << ": " << node->get_type_name() << " - " << node->get_friendly_name() << "  output type " << node->get_output_element_type(0) << "  skip_precision_sensitive " << skip_precision_sensitive << " fp16_compression_is_disabled(node) " << fp16_compression_is_disabled(node) << "  has_fp16_compression " << has_fp16_compression << std::endl;
+        // }
+        // if (is_conv)
+        //     continue;
+
         // Recursively apply transformation for sub-graph based operations
         if (auto sub_graph_node = ov::as_type_ptr<op::util::MultiSubGraphOp>(node)) {
             size_t sub_graphs_num = sub_graph_node->get_internal_subgraphs_size();
@@ -437,6 +454,7 @@ bool ov::pass::ConvertPrecision::run_on_model(const std::shared_ptr<ov::Model>& 
          m_store_original_precision_as_rt_attribute ? store_original_type_as_attribute : wrap_into_original_type},
         {ov::op::v6::ReadValue::get_type_info_static(),
          m_store_original_precision_as_rt_attribute ? store_original_type_as_attribute : wrap_into_original_type},
+        // {ov::op::v1::Convolution::get_type_info_static(), wrap_into_original_type},
         {ov::op::v3::NonMaxSuppression::get_type_info_static(), fuse_type_to_nms3},
         {ov::op::v4::NonMaxSuppression::get_type_info_static(), fuse_type_to_nms4},
         {ov::op::v5::NonMaxSuppression::get_type_info_static(), fuse_type_to_nms5},

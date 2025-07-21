@@ -824,6 +824,68 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             }
         }
     }
+    // convert bf16 primitive to fp32
+    // e.g. before: (bf16) -> eltwise(bf16) -> (bf16)
+    //      after:  (bf16) -> reorder(fp32) -> eltwise(fp32) -> reorder(bf16) -> (bf16)
+    // FIXME: make a separate function
+    for (auto& node : p.get_processing_order()) {
+        if (node->is_constant() || node->is_input() || node->is_type<reorder>())
+            continue;
+
+        GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+        // if output is bf16, change it to fp32 and add reorder to bf16
+        if (node->get_output_layout().data_type == data_types::bf16) {
+            auto bf16_out_layout = node->get_output_layout();
+
+            auto fp32_out_layout = bf16_out_layout;
+            fp32_out_layout.data_type = data_types::f32;
+
+            GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+            auto new_reorder = rf.get_reorder(node->id(), fp32_out_layout, bf16_out_layout);
+            if (new_reorder.first) {
+                auto& reorder_node = p.get_or_create(new_reorder.first);
+                // p.replace_all_usages(*node, reorder_node, false);
+                GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+                for (auto *n: node->get_users()) {
+                    std::cout << "  user: " << n->id() << std::endl;
+                }
+                p.add_intermediate(reorder_node, **node->get_users().begin(), 0, !new_reorder.second, true);
+                reorder_node.recalc_output_layouts(false);
+                for (auto *n: node->get_users()) {
+                    std::cout << "  user: " << n->id() << std::endl;
+                }
+            }
+            node->set_output_layout(fp32_out_layout, false);
+        }
+
+        // GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+        // // If it has bf16 input, add reorder to fp32
+        // for (size_t i = 0; i < node->get_inputs_count(); i++) {
+        //     auto& input = node->get_dependency(i);
+        //     GPU_DEBUG_COUT << "Processing node: " << node->id() << "  input " << input.id() << std::endl;
+        //     auto input_layout = input.get_output_layout();
+        //     GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+        //     if (input_layout.data_type == data_types::bf16) {
+        //         auto new_layout = input_layout; // FIXME: name is misleading, it is not a new layout
+        //         new_layout.data_type = data_types::f32;
+        //         auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
+        //         GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+        //         if (new_input.first) {
+        //             p.add_intermediate(new_input.first, *node, i, !new_input.second);
+        //             node->recalc_output_layouts(false);
+        //         }
+        //     }
+        // }
+        // GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+
+        break;
+        // print node output format
+        static int count = 0;
+        count++;
+        if (count > 1)
+            break;
+        std::cout << "Node: " << node->id() << " Output format: " << dt_to_str(node->get_output_layout().data_type) << std::endl;
+    }
 
     // WA for OneDNN binary add fusions: we need to broadcast batch dimension to avoid situation with
     // batch dimension mismatch in OneDNN tensor descriptors as follow:

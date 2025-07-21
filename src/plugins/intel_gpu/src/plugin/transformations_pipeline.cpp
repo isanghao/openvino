@@ -367,11 +367,15 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
 
         // call conversion of float types with keep_precision_sensitive_in_fp32 = true
         auto fp_precision_supported = [&](ov::element::Type e) -> bool {
+            const bool convert_bf16_to_f32 = false;
+            const bool use_bf16 = true;
+            (void)convert_bf16_to_f32;
+            (void)use_bf16;
             switch (e) {
                 case ov::element::f16: return device_info.supports_fp16;
                 case ov::element::f32: return true; // assume that all GPUs support f32 data type
                 case ov::element::f64: return device_info.supports_fp64;
-                case ov::element::bf16: return false;
+                case ov::element::bf16: return use_bf16;
                 default: return false;
             }
             return false;

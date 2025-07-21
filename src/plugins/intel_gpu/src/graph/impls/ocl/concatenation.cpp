@@ -125,6 +125,7 @@ attach_concatenation_impl::attach_concatenation_impl() {
         std::make_tuple(data_types::i64, format::yxfb),
         std::make_tuple(data_types::f32, format::bfyx),
         std::make_tuple(data_types::f16, format::bfyx),
+        std::make_tuple(data_types::bf16, format::bfyx),
         std::make_tuple(data_types::i8, format::bfyx),
         std::make_tuple(data_types::u8, format::bfyx),
         std::make_tuple(data_types::i32, format::bfyx),
