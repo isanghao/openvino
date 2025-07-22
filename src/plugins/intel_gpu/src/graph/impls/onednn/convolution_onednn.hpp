@@ -86,7 +86,7 @@ struct ConvolutionImplementationManager : public ImplementationManager {
             return false;
 
         bool f16_conv = everyone_is(data_types::f16, in_dt, wei_dt) && one_of(out_dt, {data_types::f16, data_types::f32, data_types::u8, data_types::i8});
-        bool bf16_conv = everyone_is(data_types::bf16, in_dt, wei_dt) && one_of(out_dt, {data_types::bf16});
+        bool bf16_conv = false; //everyone_is(data_types::bf16, in_dt, wei_dt) && one_of(out_dt, {data_types::bf16});
         bool u8s8_conv = one_of(in_dt, {data_types::i8, data_types::u8}) &&
                          wei_dt == data_types::i8 &&
                          one_of(out_dt, {data_types::i32, data_types::f16, data_types::f32, data_types::u8, data_types::i8});
