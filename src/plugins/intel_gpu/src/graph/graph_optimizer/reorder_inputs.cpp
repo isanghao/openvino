@@ -857,7 +857,8 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         }
         // If it has bf16 input, add reorder to fp32
-        for (size_t i = 0; i < node->get_inputs_count(); i++) {
+        for (size_t i = 0; i < node->get_inputs_count() + node->get_fused_inputs_count(); i++) {
+            // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
             auto& input = node->get_dependency(i);
             auto input_layout = input.get_output_layout();
             if (input_layout.data_type == data_types::bf16) {
@@ -868,13 +869,26 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
                 if (new_input.first) {
                     GPU_DEBUG_COUT << "   adding reorder to input.. " << reorder_node.id() << std::endl;
                     p.add_intermediate(new_input.first, *node, i, !new_input.second);
-                    node->recalc_output_layouts(false);
+                } else {
+                    GPU_DEBUG_COUT << "   do not add reorder to input.. " << input.id() << std::endl;
                 }
                 reorder_node.recalc_output_layouts(false);
             }
         }
+        for (size_t i = 0; i < node->get_fused_primitives().size(); i++) {
+            // XXX: Hack to change fused input data type to f32
+            auto& fused_prim = node->get_fused_primitives()[i];
+            auto& fused_output_layout = fused_prim.output_layout;
+            if (fused_output_layout.data_type == data_types::bf16)
+                fused_output_layout.data_type = data_types::f32;
+        }
+        // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+        node->recalc_output_layouts(false);
+        OPENVINO_ASSERT(node->get_output_layout().data_type != data_types::bf16,
+            "XXX: Node output data type should not be bf16 after reorder_inputs pass");
+        // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         // for (auto n : p.get_processing_order()) {
-        //     if (n->id() == "multiply:/Mul_1")
+        //     if (n->id() == "multiply:Multiply_39176")
         //         GPU_DEBUG_COUT << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
         // }
     }
