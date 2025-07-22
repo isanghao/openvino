@@ -840,51 +840,49 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             auto fp32_out_layout = bf16_out_layout;
             fp32_out_layout.data_type = data_types::f32;
 
-            GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
             auto new_reorder = rf.get_reorder(node->id(), fp32_out_layout, bf16_out_layout);
             if (new_reorder.first) {
                 auto& reorder_node = p.get_or_create(new_reorder.first);
+                GPU_DEBUG_COUT << "   adding reorder to output.. " << reorder_node.id() << std::endl;
                 // p.replace_all_usages(*node, reorder_node, false);
-                GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
-                for (auto *n: node->get_users()) {
-                    std::cout << "  user: " << n->id() << std::endl;
-                }
-                p.add_intermediate(reorder_node, **node->get_users().begin(), 0, !new_reorder.second, true);
+                p.add_intermediate(reorder_node, **node->get_users().begin(), *node, !new_reorder.second, true);
                 reorder_node.recalc_output_layouts(false);
-                for (auto *n: node->get_users()) {
-                    std::cout << "  user: " << n->id() << std::endl;
-                }
             }
             node->set_output_layout(fp32_out_layout, false);
+
+            // hack to manipulate primitive data type
+            auto *prim = const_cast<primitive*>(&*node->get_primitive());
+            if (prim && prim->output_data_types.size() > 0 && prim->output_data_types[0].has_value())
+                prim->output_data_types[0] = data_types::f32;
+            // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         }
-
-        // GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
-        // // If it has bf16 input, add reorder to fp32
-        // for (size_t i = 0; i < node->get_inputs_count(); i++) {
-        //     auto& input = node->get_dependency(i);
-        //     GPU_DEBUG_COUT << "Processing node: " << node->id() << "  input " << input.id() << std::endl;
-        //     auto input_layout = input.get_output_layout();
-        //     GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
-        //     if (input_layout.data_type == data_types::bf16) {
-        //         auto new_layout = input_layout; // FIXME: name is misleading, it is not a new layout
-        //         new_layout.data_type = data_types::f32;
-        //         auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
-        //         GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
-        //         if (new_input.first) {
-        //             p.add_intermediate(new_input.first, *node, i, !new_input.second);
-        //             node->recalc_output_layouts(false);
-        //         }
-        //     }
+        // If it has bf16 input, add reorder to fp32
+        for (size_t i = 0; i < node->get_inputs_count(); i++) {
+            auto& input = node->get_dependency(i);
+            auto input_layout = input.get_output_layout();
+            if (input_layout.data_type == data_types::bf16) {
+                auto new_layout = input_layout; // FIXME: name is misleading, it is not a new layout
+                new_layout.data_type = data_types::f32;
+                auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
+                auto& reorder_node = p.get_or_create(new_input.first);
+                if (new_input.first) {
+                    GPU_DEBUG_COUT << "   adding reorder to input.. " << reorder_node.id() << std::endl;
+                    p.add_intermediate(new_input.first, *node, i, !new_input.second);
+                    node->recalc_output_layouts(false);
+                }
+                reorder_node.recalc_output_layouts(false);
+            }
+        }
+        // for (auto n : p.get_processing_order()) {
+        //     if (n->id() == "multiply:/Mul_1")
+        //         GPU_DEBUG_COUT << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
         // }
-        // GPU_DEBUG_COUT << "Processing node: " << node->id() << std::endl;
+    }
 
-        break;
-        // print node output format
-        static int count = 0;
-        count++;
-        if (count > 1)
-            break;
-        std::cout << "Node: " << node->id() << " Output format: " << dt_to_str(node->get_output_layout().data_type) << std::endl;
+    for (auto n : p.get_processing_order()) {
+        // if (n->id() == "multiply:/Mul_1")
+        //     GPU_DEBUG_COUT << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
+        n->recalc_output_layouts(true);
     }
 
     // WA for OneDNN binary add fusions: we need to broadcast batch dimension to avoid situation with
