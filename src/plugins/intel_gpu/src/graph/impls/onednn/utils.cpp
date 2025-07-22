@@ -127,6 +127,7 @@ dnnl::memory::data_type convert_data_type(cldnn::data_types dt) {
     switch (dt) {
         case cldnn::data_types::f32: return dnnl::memory::data_type::f32;
         case cldnn::data_types::f16: return dnnl::memory::data_type::f16;
+        case cldnn::data_types::bf16: return dnnl::memory::data_type::bf16;
         case cldnn::data_types::i8: return dnnl::memory::data_type::s8;
         case cldnn::data_types::u8: return dnnl::memory::data_type::u8;
         case cldnn::data_types::i32: return dnnl::memory::data_type::s32;

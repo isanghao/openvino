@@ -500,13 +500,14 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
     // e.g. before: (bf16) -> eltwise(bf16) -> (bf16)
     //      after:  (bf16) -> reorder(fp32) -> eltwise(fp32) -> reorder(bf16) -> (bf16)
     // FIXME: make a separate function
+#define MYLOG GPU_DEBUG_TRACE_DETAIL
     for (auto& node : p.get_processing_order()) {
         if (node->is_type<data>() || node->is_input() || node->is_type<reorder>()) {
-            GPU_DEBUG_COUT << "Do not process node: " << node->id() << " output data type " << node->get_output_layout().data_type << " node->is_constant() " << node->is_constant() << " node->is_input() " << node->is_input() << std::endl;
+            MYLOG << "Do not process node: " << node->id() << " output data type " << node->get_output_layout().data_type << " node->is_constant() " << node->is_constant() << " node->is_input() " << node->is_input() << std::endl;
             continue;
         }
 
-        GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+        MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         // if output is bf16, change it to fp32 and add reorder to bf16
         if (node->get_output_layout().data_type == data_types::bf16) {
             auto bf16_out_layout = node->get_output_layout();
@@ -517,7 +518,7 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             auto new_reorder = rf.get_reorder(node->id(), fp32_out_layout, bf16_out_layout);
             if (new_reorder.first) {
                 auto& reorder_node = p.get_or_create(new_reorder.first);
-                GPU_DEBUG_COUT << "   adding reorder to output.. " << reorder_node.id() << std::endl;
+                MYLOG << "   adding reorder to output.. " << reorder_node.id() << std::endl;
                 // p.replace_all_usages(*node, reorder_node, false);
                 p.add_intermediate(reorder_node, **node->get_users().begin(), *node, !new_reorder.second, true);
                 reorder_node.recalc_output_layouts(false);
@@ -529,12 +530,12 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             auto *prim = const_cast<primitive*>(&*node->get_primitive());
             if (prim && prim->output_data_types.size() > 0 && prim->output_data_types[0].has_value())
                 prim->output_data_types[0] = data_types::f32;
-            // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+            // MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         }
         // If it has bf16 input, add reorder to fp32
         auto& deps = node->get_dependencies();
         for (size_t i = 0; i < deps.size(); i++) {
-            // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+            // MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
             auto& input = node->get_dependency(i);
             auto input_layout = input.get_output_layout();
             if (input_layout.data_type == data_types::bf16) {
@@ -543,10 +544,10 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
                 auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
                 auto& reorder_node = p.get_or_create(new_input.first);
                 if (new_input.first) {
-                    GPU_DEBUG_COUT << "   adding reorder to input.. " << reorder_node.id() << std::endl;
+                    MYLOG << "   adding reorder to input.. " << reorder_node.id() << std::endl;
                     p.add_intermediate(new_input.first, *node, i, !new_input.second);
                 } else {
-                    GPU_DEBUG_COUT << "   do not add reorder to input.. " << input.id() << std::endl;
+                    MYLOG << "   do not add reorder to input.. " << input.id() << std::endl;
                 }
                 reorder_node.recalc_output_layouts(false);
             }
@@ -558,20 +559,20 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             if (fused_output_layout.data_type == data_types::bf16)
                 fused_output_layout.data_type = data_types::f32;
         }
-        // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+        // MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         node->recalc_output_layouts(false);
         OPENVINO_ASSERT(node->get_output_layout().data_type != data_types::bf16,
             "XXX: Node output data type should not be bf16 after reorder_inputs pass");
-        // GPU_DEBUG_COUT << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+        // MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         // for (auto n : p.get_processing_order()) {
         //     if (n->id() == "multiply:Multiply_39176")
-        //         GPU_DEBUG_COUT << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
+        //         MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
         // }
     }
 
     for (auto n : p.get_processing_order()) {
         // if (n->id() == "multiply:/Mul_1")
-        //     GPU_DEBUG_COUT << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
+        //     MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
         n->recalc_output_layouts(true);
     }
 
