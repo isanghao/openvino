@@ -21,6 +21,7 @@ inline uint32_t BytesPerElement(Datatype dt) {
         case Datatype::INT8:
         case Datatype::UINT8:
             return 1;
+        case Datatype::BF16:
         case Datatype::F16:
         case Datatype::INT16:
         case Datatype::UINT16:
@@ -41,6 +42,7 @@ inline uint32_t BytesPerElement(WeightsType wt) {
         case WeightsType::INT8:
         case WeightsType::UINT8:
             return 1;
+        case WeightsType::BF16:
         case WeightsType::F16:
             return 2;
         case WeightsType::F32:

@@ -570,11 +570,11 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
         // }
     }
 
-    for (auto n : p.get_processing_order()) {
+    // for (auto n : p.get_processing_order()) {
         // if (n->id() == "multiply:/Mul_1")
         //     MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
-        n->recalc_output_layouts(true);
-    }
+        // n->recalc_output_layouts(true);
+    // }
 
 
     auto fmt_map = get_preferred_formats(p, lo);

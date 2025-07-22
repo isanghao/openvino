@@ -983,8 +983,8 @@ void prepare_primitive_fusing::fuse_simple_primitives(program &p) {
             std::vector<bool> can_fuse_parents = { false, false };
 
             for (size_t i = 0; i < parents.size(); i++) {
-                can_fuse_parents[i] = (parents[i].first->is_type<convolution>() &&
-                                       conv_supports_fusings(parents[i].first->as<convolution>())) ||
+                can_fuse_parents[i] = /*(parents[i].first->is_type<convolution>() &&
+                                       conv_supports_fusings(parents[i].first->as<convolution>())) || */
                                       (parents[i].first->is_type<mvn>() &&
                                        mvn_supports_fusings(parents[i].first->as<mvn>())) ||
                                       (parents[i].first->is_type<group_normalization>()) ||
