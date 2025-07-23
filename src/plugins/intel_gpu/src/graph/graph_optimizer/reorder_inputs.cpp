@@ -506,10 +506,7 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             MYLOG << "Do not process node: " << node->id() << " output data type " << node->get_output_layout().data_type << " node->is_constant() " << node->is_constant() << " node->is_input() " << node->is_input() << std::endl;
             continue;
         }
-        static bool first_conv = true;
-        if (node->is_type<convolution>() && first_conv) {
-            first_conv = false;
-            GPU_DEBUG_COUT << "do not convert " << node->id() << std::endl;
+        if (node->is_type<convolution>()) {
             continue;
         }
 
@@ -569,18 +566,20 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
         node->recalc_output_layouts(false);
         OPENVINO_ASSERT(node->get_output_layout().data_type != data_types::bf16,
             "XXX: Node output data type should not be bf16 after reorder_inputs pass");
-        // MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
+        MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         // for (auto n : p.get_processing_order()) {
         //     if (n->id() == "multiply:Multiply_39176")
         //         MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
         // }
     }
 
-    // for (auto n : p.get_processing_order()) {
-        // if (n->id() == "multiply:/Mul_1")
-        //     MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl;
-        // n->recalc_output_layouts(true);
-    // }
+#define PRINT_BF16_CONV do { \
+    for (auto n : p.get_processing_order()) {   \
+        if (n->get_output_layout().data_type == data_types::bf16 && n->is_type<convolution>())  \
+            MYLOG << n->id() << " output data type: " << n->get_output_layout().data_type << std::endl; \
+    }   \
+} while(0)
+    // PRINT_BF16_CONV;
 
 
     auto fmt_map = get_preferred_formats(p, lo);
