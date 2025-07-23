@@ -506,6 +506,12 @@ void reorder_inputs::run(program& p, reorder_factory& rf) {
             MYLOG << "Do not process node: " << node->id() << " output data type " << node->get_output_layout().data_type << " node->is_constant() " << node->is_constant() << " node->is_input() " << node->is_input() << std::endl;
             continue;
         }
+        static bool first_conv = true;
+        if (node->is_type<convolution>() && first_conv) {
+            first_conv = false;
+            GPU_DEBUG_COUT << "do not convert " << node->id() << std::endl;
+            continue;
+        }
 
         MYLOG << "Processing node: " << node->id() << " output data type " << node->get_output_layout().data_type << std::endl;
         // if output is bf16, change it to fp32 and add reorder to bf16
