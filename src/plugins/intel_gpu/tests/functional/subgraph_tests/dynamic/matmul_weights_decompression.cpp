@@ -152,22 +152,25 @@ protected:
         };
 
         const bool group_decompression = group_size != -1;
-        // Weights has shape [I, O], where
+        // Weights has shape [B, I, O], where
+        // B - batch size (optional)
         // I - input channels
         // O - output channels
         // In case of group decompression, input channels dimension is split into 2: I -> [N, G], where
         // N - number of groups
         // G - group size
         auto transformed_weights_shape = transpose_if_necessary(weights_shape);
+        auto weights_rank = weights_shape.size();
+        auto &weights_shape_in = weights_shape[weights_rank - 2];
         if (group_decompression) {
-            OPENVINO_ASSERT(weights_shape[0] % group_size == 0,
+            OPENVINO_ASSERT(weights_shape_in % group_size == 0,
                             "Weights output channels count (",
-                            weights_shape[0],
+                            weights_shape_in,
                             ") must be divisible by decompression group size (",
                             group_size,
                             ").");
             auto in_channel_idx = transpose_weights ? transformed_weights_shape.size() - 1 : transformed_weights_shape.size() - 2;
-            transformed_weights_shape[in_channel_idx] = weights_shape[0] / group_size;
+            transformed_weights_shape[in_channel_idx] = weights_shape_in / group_size;
             transformed_weights_shape.insert(transformed_weights_shape.begin() + in_channel_idx + 1, group_size);
         }
         auto weights_tensor = ov::test::utils::create_and_fill_tensor(weights_precision, transformed_weights_shape);
@@ -182,7 +185,7 @@ protected:
         // Ordinary decompression: [O, 1]
         // Group decompression: [O, N, 1]
         ov::Shape scaleshift_target_shape{output_channels};
-        scaleshift_target_shape.insert(scaleshift_target_shape.begin(), group_decompression ? weights_shape[0] / group_size : 1);
+        scaleshift_target_shape.insert(scaleshift_target_shape.begin(), group_decompression ? weights_shape_in / group_size : 1);
         scaleshift_target_shape = transpose_if_necessary(scaleshift_target_shape);
         if (group_decompression) {
             auto in_channel_idx = transpose_weights ? scaleshift_target_shape.size() - 1 : scaleshift_target_shape.size() - 2;
@@ -228,8 +231,12 @@ protected:
         std::shared_ptr<ov::Node> last_node = std::make_shared<ov::op::v1::Multiply>(mul_parent, scale_const);
 
         if (group_decompression) {
-            auto reshape_target_shape = transpose_weights ? std::vector<int>{-1, static_cast<int>(weights_shape[0])}
-                                                          : std::vector<int>{static_cast<int>(weights_shape[0]), -1};
+            auto in_channel_idx = transpose_weights ? weights_shape.size() - 1 : weights_shape.size() - 2;
+            auto reshape_target_shape = transpose_weights ? std::vector<int>{-1, static_cast<int>(weights_shape_in)}
+                                                          : std::vector<int>{static_cast<int>(weights_shape_in), -1};
+            for (size_t i = 0; i < in_channel_idx; ++i) {
+                reshape_target_shape.insert(reshape_target_shape.begin() + i, weights_shape[i]);
+            }
             auto target_shape_node = ov::op::v0::Constant::create(ov::element::i32, {reshape_target_shape.size()}, reshape_target_shape);
             last_node = std::make_shared<ov::op::v1::Reshape>(last_node, target_shape_node, false);
         }
@@ -459,6 +466,22 @@ INSTANTIATE_TEST_SUITE_P(smoke_MatMulCompressedWeights_dyn_quan_no_slm,
                                             ::testing::Values(false),
                                             ::testing::Values(true),  // per_tensor_zp
                                             ::testing::ValuesIn(group_size),
+                                            ::testing::Values(2.0f)),   // Note: this is because of potential cldnn accuracy issue
+                         MatmulWeightsDecompression::get_test_case_name);
+
+
+INSTANTIATE_TEST_SUITE_P(smoke_MatMulCompressedWeights_3d_weight,
+                         MatmulWeightsDecompression,
+                         ::testing::Combine(::testing::Values(ShapeParams{{{16, -1, 1024}, {{16, 128, 1024}}},
+                                                                            {16, 1024, 512}, 128}),  // shape
+                                            ::testing::Values(ov::element::u4),
+                                            ::testing::Values(ov::element::f16),
+                                            ::testing::Values(false),
+                                            ::testing::Values(false), //add_decompression_sub
+                                            ::testing::Values(true),
+                                            ::testing::Values(false),
+                                            ::testing::Values(true),  // per_tensor_zp
+                                            ::testing::Values(0), // dyn_quan is off
                                             ::testing::Values(2.0f)),   // Note: this is because of potential cldnn accuracy issue
                          MatmulWeightsDecompression::get_test_case_name);
 

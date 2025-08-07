@@ -25,8 +25,7 @@ ConvertMatMulToFullyConnected::ConvertMatMulToFullyConnected() {
         const auto& pshape = output.get_partial_shape();
         return ov::op::util::is_on_constant_path(output) &&
                static_rank_gt_1(output) &&
-               pshape.is_static() &&
-               std::count_if(pshape.begin(), pshape.end(), [](const ov::Dimension& x) { return x != 1; }) <= 2;
+               pshape.is_static();
     };
 
     auto activations_m = ov::pass::pattern::any_input(static_rank_gt_1);
@@ -104,14 +103,14 @@ ConvertMatMulToFullyConnected::ConvertMatMulToFullyConnected() {
                 std::swap(*(shape_b_aligned.end() - 1), *(shape_b_aligned.end() - 2));
             }
 
-            // check on per-batch MatMul which can't be converted to FC
-            for (size_t i = 0; i < max_size - 2; ++i) {
-                if (shape_b_aligned[i] == 1) {
-                    shape_b_aligned[i] = shape_a_aligned[i];
-                } else {
-                    return std::make_tuple(false, std::move(shape_a_aligned), std::move(shape_b_aligned));
-                }
-            }
+            // XXX: check on per-batch MatMul which can't be converted to FC
+            // for (size_t i = 0; i < max_size - 2; ++i) {
+            //     if (shape_b_aligned[i] == 1 ) {
+            //         shape_b_aligned[i] = shape_a_aligned[i];
+            //     } else {
+            //         return std::make_tuple(false, std::move(shape_a_aligned), std::move(shape_b_aligned));
+            //     }
+            // }
             return std::make_tuple(true, std::move(shape_a_aligned), std::move(shape_b_aligned));
         };
 

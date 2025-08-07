@@ -38,7 +38,10 @@ ConvertFullyConnectedToFullyConnectedCompressed::ConvertFullyConnectedToFullyCon
     auto reshape_3d_to_2d = [](const ov::Output<ov::Node>& output) {
         auto in_ps = output.get_node()->get_input_partial_shape(0);
         auto out_ps = output.get_node()->get_output_partial_shape(0);
-        return in_ps.rank().is_static() && out_ps.rank().is_static() && in_ps.size() == 3 && out_ps.size() == 2;
+        bool is_3d_to_2d = in_ps.size() == 3 && out_ps.size() == 2;
+        bool is_4d_to_3d = in_ps.size() == 4 && out_ps.size() == 3;
+        return in_ps.rank().is_static() && out_ps.rank().is_static() &&
+                (is_3d_to_2d || is_4d_to_3d);
     };
 
     auto weights_m = wrap_type<ov::op::v0::Constant>(compressed_constant);
@@ -99,15 +102,25 @@ ConvertFullyConnectedToFullyConnectedCompressed::ConvertFullyConnectedToFullyCon
             if (current_shape.size() <= 2)
                 return constant;
 
-            OPENVINO_ASSERT(current_shape.size() == 3);
+            if (current_shape.size() == 3) {
+                auto new_shape = (has_transpose || !grouped) ? ov::Shape{current_shape[0] * current_shape[1], current_shape[2]}
+                                                            : ov::Shape{current_shape[0], current_shape[1] * current_shape[2]};
 
-            auto new_shape = (has_transpose || !grouped) ? ov::Shape{current_shape[0] * current_shape[1], current_shape[2]}
-                                                         : ov::Shape{current_shape[0], current_shape[1] * current_shape[2]};
+                auto new_constant = std::make_shared<ov::op::v0::Constant>(*constant, new_shape);
 
-            auto new_constant = std::make_shared<ov::op::v0::Constant>(*constant, new_shape);
+                ov::copy_weightless_cache_attr(constant, new_constant);
+                return new_constant;
+            } else if (current_shape.size() == 4) {
+                auto new_shape = (has_transpose || !grouped) ? ov::Shape{current_shape[0], current_shape[1] * current_shape[2], current_shape[3]}
+                                                            : ov::Shape{current_shape[0], current_shape[1], current_shape[2] * current_shape[3]};
 
-            ov::copy_weightless_cache_attr(constant, new_constant);
-            return new_constant;
+                auto new_constant = std::make_shared<ov::op::v0::Constant>(*constant, new_shape);
+
+                ov::copy_weightless_cache_attr(constant, new_constant);
+                return new_constant;
+            } else {
+                OPENVINO_ASSERT(false);
+            }
         };
 
         auto convert_const_to_u8 = [&](std::shared_ptr<ov::Node> node) {
