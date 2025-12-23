@@ -27,6 +27,23 @@ static void CreateScatterNDUpdateOp(ProgramBuilder& p, const std::shared_ptr<ov:
     p.add_primitive(*op, primitive);
 }
 
+// XXX: FIXME: v15 is not implemented. it is just a copy of v3
+static void CreateScatterNDUpdateOp(ProgramBuilder& p, const std::shared_ptr<ov::op::v15::ScatterNDUpdate>& op) {
+    validate_inputs_count(op, {3});
+    auto inputs = p.GetInputInfo(op);
+    std::string layerName = layer_type_name_ID(op);
+    auto indices_rank = op->get_input_partial_shape(1).size();
+
+    auto primitive = cldnn::scatter_nd_update(layerName,
+                                              inputs[0],
+                                              inputs[1],
+                                              inputs[2],
+                                              indices_rank);
+
+    p.add_primitive(*op, primitive);
+}
+
 REGISTER_FACTORY_IMPL(v3, ScatterNDUpdate);
+REGISTER_FACTORY_IMPL(v15, ScatterNDUpdate);
 
 }  // namespace ov::intel_gpu

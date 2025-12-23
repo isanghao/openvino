@@ -5,7 +5,12 @@
 #include "include/batch_headers/fetch_data.cl"
 
 #if OUTPUT_DIMS == 5
-    #define INPUT_0 input0[INPUT0_GET_INDEX_SAFE(b, f, z, y, x)]
+    #if INPUT0_DIMS == 4
+        #define INPUT_0 input0[INPUT0_GET_INDEX_SAFE(b, f, y, x)]
+    #else
+        #define INPUT_0 input0[INPUT0_GET_INDEX_SAFE(b, f, z, y, x)]
+    #endif
+
     #if INPUT1_DIMS == 4
         #define INPUT_1 input1[INPUT1_GET_INDEX_SAFE(b, f, y, x)]
     #else

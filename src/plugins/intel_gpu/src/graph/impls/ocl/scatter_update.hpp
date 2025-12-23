@@ -8,6 +8,10 @@
 #include <memory>
 namespace cldnn {
 namespace ocl {
+#define DO_NOT_USE_THIS_IMPL() do { \
+    GPU_DEBUG_TRACE << "Do not use this impl: " << std::endl; \
+    return false; } while (0);
+
 
 struct ScatterUpdateImplementationManager : public ImplementationManager {
     OV_GPU_PRIMITIVE_IMPL("ocl::scatter_update")
@@ -40,6 +44,7 @@ struct ScatterUpdateImplementationManager : public ImplementationManager {
         static const std::vector<ov::element::Type_t> supported_in_types = {
             ov::element::f32,
             ov::element::f16,
+            ov::element::i64,
             ov::element::i32
         };
 
@@ -56,17 +61,21 @@ struct ScatterUpdateImplementationManager : public ImplementationManager {
         const auto& out_layout = node.get_output_layout(0);
         if (m_shape_type == shape_types::dynamic_shape) {
             if (!one_of(in0_layout.format, supported_dynamic_fmts) || !one_of(out_layout.format, supported_dynamic_fmts))
-                return false;
+                DO_NOT_USE_THIS_IMPL();
         } else {
             if (!one_of(in0_layout.format, supported_static_fmts) || !one_of(out_layout.format, supported_static_fmts))
-                return false;
+                DO_NOT_USE_THIS_IMPL();
         }
 
-        if (!one_of(in0_layout.data_type, supported_in_types) || !one_of(in1_layout.data_type, supported_in_types))
-            return false;
+        if (!one_of(in0_layout.data_type, supported_in_types) || !one_of(in1_layout.data_type, supported_in_types)) {
+            GPU_DEBUG_COUT << "Unsupported input data types: "
+                            << in0_layout.data_type << ", "
+                            << in1_layout.data_type << std::endl;
+                DO_NOT_USE_THIS_IMPL();
+        }
 
         if (!one_of(out_layout.data_type, supported_out_types))
-            return false;
+                DO_NOT_USE_THIS_IMPL();
 
         return true;
     }
