@@ -680,6 +680,17 @@ std::map<primitive_id, network_output> network::execute(const std::vector<event:
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "NetworkImpl::Execute");
     NETWORK_DEBUG(*this);
 
+    kernel_impl_params params;
+    auto kernel_str = std::make_shared<kernel_string>();
+    kernel_str->str = "__kernel void dummy_start() {}";
+    kernel_str->entry_point = "dummy_start";
+    auto &kernels_cache = get_program()->get_kernels_cache();
+    auto kernels = kernels_cache.compile(params, {kernel_str});
+    // auto &stream = m_network.get_stream();
+    auto ret = kernels_cache.validate_simple_kernel_execution(kernels[params][0].first, get_program()->get_id(), get_id(), get_current_iteration_num());
+    GPU_DEBUG_TRACE << ret << std::endl;
+
+
     // Wait for previous execution completion
     reset_execution(false);
 
@@ -733,6 +744,18 @@ std::map<primitive_id, network_output> network::execute(const std::vector<event:
             ev = inst->get_impl_params()->out_event;
 
         result.emplace(id, network_output(ev, inst->output_memory_ptr(0), get_stream_ptr(), inst->get_output_layout(0)));
+    }
+
+    {
+        kernel_impl_params params;
+        auto kernel_str = std::make_shared<kernel_string>();
+        kernel_str->str = "__kernel void dummy_finish() {}";
+        kernel_str->entry_point = "dummy_finish";
+        auto &kernels_cache = get_program()->get_kernels_cache();
+        auto kernels = kernels_cache.compile(params, {kernel_str});
+        // auto &stream = m_network.get_stream();
+        auto ret = kernels_cache.validate_simple_kernel_execution(kernels[params][0].first, get_program()->get_id(), get_id(), get_current_iteration_num());
+        GPU_DEBUG_TRACE << ret << std::endl;
     }
     return result;
 }
