@@ -695,6 +695,16 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
             is_first = false;
         }
 
+        /* We can only build a meaningful reference for KV cache layouts we
+         * know how to decode here:
+         *   - Uncompressed fp16 paged K (IS_KV_COMPRESSED_PA not defined), or
+         *   - u4 BY_CHANNEL paged K (IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL).
+         * For any other compressed layout (e.g. i8 BY_TOKEN / BY_CHANNEL),
+         * reading the raw bytes as fp16 yields NaN/garbage, so we skip the
+         * check instead of printing a misleading MISMATCH.
+         */
+    #if !defined(IS_KV_COMPRESSED_PA) \
+            || (IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL)
         if (get_group_id(0) == 0 && get_group_id(1) == 0
                 && get_group_id(2) == 0 && sg_ij == 0
                 && k0 == window_k0_begin) {
@@ -711,24 +721,50 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                 for (int dd = 0; dd < d; dd++) {
                     float k_v;
                     if (k_row < past_len) {
-                        /* Past-K from paged cache: per-block layout is
-                         * [head_dim rows x PAGED_ATTENTION_BLOCK_SIZE cols]
-                         * with row stride ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE. */
+                        /* Past-K from paged cache. */
                         const int bidx = k_row / PAGED_ATTENTION_BLOCK_SIZE;
                         const int within = k_row % PAGED_ATTENTION_BLOCK_SIZE;
                         const int block_id =
                                 block_indices[base_block_index + bidx];
-                        const global half *Kblk =
-                                (const global half *)(K
-                                        + KV_HEADS_NUM
-                                                * ADJUSTED_K_HEAD_SIZE
-                                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
-                                                * block_id);
+                        const size_t block_off = (size_t)KV_HEADS_NUM
+                                * ADJUSTED_K_HEAD_SIZE
+                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                                * (size_t)block_id;
+    #if IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL
+                        /* u4 BY_CHANNEL layout: for each dim column
+                         * (row stride = ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                         *  bytes) the first PAGED_ATTENTION_BLOCK_SIZE/2 bytes
+                         * hold packed u4 tokens (low nibble = even token, high
+                         * nibble = odd token), followed by fp16 scale and fp16
+                         * zp. Decompressed value = (u4 - zp) * scale. */
+                        const global uchar *Kblk_u8
+                                = (const global uchar *)(K + block_off);
+                        const int col_off_bytes = dd
+                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE;
+                        const uchar packed
+                                = Kblk_u8[col_off_bytes + (within >> 1)];
+                        const int u4_val = ((within & 1) == 0)
+                                ? (packed & 0x0F)
+                                : ((packed >> 4) & 0x0F);
+                        const global half *sz = (const global half *)(Kblk_u8
+                                + col_off_bytes
+                                + (PAGED_ATTENTION_BLOCK_SIZE >> 1));
+                        const float k_scale_v = convert_float(sz[0]);
+                        const float k_zp_v = convert_float(sz[1]);
+                        k_v = ((float)u4_val - k_zp_v) * k_scale_v;
+    #else
+                        /* Uncompressed fp16 paged cache: per-block layout is
+                         * [head_dim rows x PAGED_ATTENTION_BLOCK_SIZE cols]
+                         * with row stride ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE. */
+                        const global half *Kblk
+                                = (const global half *)(K + block_off);
                         k_v = convert_float(Kblk[dd
                                 * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
                                 + within]);
+    #endif
                     } else {
-                        /* New-K region: contiguous Kc, stride ldkc. */
+                        /* New-K region: contiguous Kc (always fp16),
+                         * stride ldkc. */
                         const int new_idx = k_row - past_len;
                         k_v = convert_float(
                                 ((const global half *)Kc)[new_idx * ldkc
@@ -753,6 +789,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                        rel < 1e-2f ? "OK" : "MISMATCH");
             }
         }
+    #endif
     #endif
 #else
         s_tile_type S_tile
