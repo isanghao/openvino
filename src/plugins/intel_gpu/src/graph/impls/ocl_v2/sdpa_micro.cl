@@ -191,6 +191,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
     const uint subsequence_end = subsequence_begins[gws_mapping + 1];
     const uint subsequence_query_block_idx = block_start_pos - subsequence_begin;
     int q = subsequence_end - subsequence_begin;
+    bool is_first = true;
     #if HAS_QQ_BIAS
         const uint qq_bias_num = qq_bias_begins[gws_mapping + 1] - qq_bias_begins[gws_mapping];
         const uint cumulated_spec_num = qq_bias_begins[gws_mapping];
@@ -609,6 +610,10 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                     ? nan(0u)
                     : -INFINITY;
 #endif
+    // if (get_global_id(0) == 0 && get_global_id(1) == 0
+    //         && get_global_id(2) == 0) {
+    //     printf("AA: sdpa_micro q %d IS_PREFILL %d IS_GQA_SINGLE_TOKEN %d\n", q, IS_PREFILL, IS_GQA_SINGLE_TOKEN);
+    // }
 
         /* Calculate S = (K^T) * Q */
 #if IS_PAGED_ATTENTION && !IS_PREFILL
@@ -666,6 +671,89 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
             break;
         }
     #endif
+        /* --------------------------------------------------------------
+         * Micro-GEMM integrity check for one S element.
+         *
+         * Runs for a single work item (WG(0,0,0), subgroup 0, first K
+         * iter). Reads S[i=0, j=0] of this subgroup's sub-tile via
+         * xlane_tile_access (all lanes participate), then recomputes the
+         * reference dot product from raw K/Q and prints the comparison.
+         *
+         *   S[0,0] = sum_{dd=0..d-1} K[dd, k_row] * Q[dd, q_col]
+         *     k_row = k0 + sg_i0_kq (== k0 for sg_ij==0)
+         *     q_col = wg_j0 + sg_j0_kq (== wg_j0 for sg_ij==0)
+         *
+         * For the paged-generation path, past-K lives in the paged block
+         * cache (K + block_indices[...]) and new-K lives in Kc (stride
+         * ldkc). Skipped on the IS_GQA_SINGLE_TOKEN sub-path (different
+         * Q packing).
+         * -------------------------------------------------------------- */
+    #if !IS_GQA_SINGLE_TOKEN
+        if (get_global_id(0) == 0 && get_global_id(1) == 0
+                && get_global_id(2) == 0 && is_first) {
+            printf("AA: sdpa_micro q %d IS_PREFILL %d IS_GQA_SINGLE_TOKEN %d\n", q, IS_PREFILL, IS_GQA_SINGLE_TOKEN);
+            is_first = false;
+        }
+
+        if (get_group_id(0) == 0 && get_group_id(1) == 0
+                && get_group_id(2) == 0 && sg_ij == 0
+                && k0 == window_k0_begin) {
+            /* All lanes of the subgroup must participate. */
+            const float s_00_from_tile = xlane_tile_access(S_tile,
+                    /* i */ 0, /* j */ 0, SUBGROUP_SIZE,
+                    ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                    ugemm_kq_c_type_nblock0);
+
+            if (get_sub_group_local_id() == 0) {
+                const int k_row = k0;                     /* sg_i0_kq==0 */
+                const int q_col = (int)wg_j0;             /* sg_j0_kq==0 */
+                float ref = 0.0f;
+                for (int dd = 0; dd < d; dd++) {
+                    float k_v;
+                    if (k_row < past_len) {
+                        /* Past-K from paged cache: per-block layout is
+                         * [head_dim rows x PAGED_ATTENTION_BLOCK_SIZE cols]
+                         * with row stride ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE. */
+                        const int bidx = k_row / PAGED_ATTENTION_BLOCK_SIZE;
+                        const int within = k_row % PAGED_ATTENTION_BLOCK_SIZE;
+                        const int block_id =
+                                block_indices[base_block_index + bidx];
+                        const global half *Kblk =
+                                (const global half *)(K
+                                        + KV_HEADS_NUM
+                                                * ADJUSTED_K_HEAD_SIZE
+                                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                                                * block_id);
+                        k_v = convert_float(Kblk[dd
+                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                                + within]);
+                    } else {
+                        /* New-K region: contiguous Kc, stride ldkc. */
+                        const int new_idx = k_row - past_len;
+                        k_v = convert_float(
+                                ((const global half *)Kc)[new_idx * ldkc
+                                        + dd]);
+                    }
+                    /* Q was already offset by subsequence_begin*ldq
+                     * + b0*HEAD_SIZE + INPUT0_PAD; q_col is relative. */
+                    const float q_v = convert_float(
+                            ((const global half *)Q)[q_col * ldq + dd]);
+                    ref += k_v * q_v;
+                }
+                const float diff = s_00_from_tile - ref;
+                const float abs_diff = diff < 0 ? -diff : diff;
+                const float abs_ref = ref < 0 ? -ref : ref;
+                const float rel = abs_ref > 1e-6f ? abs_diff / abs_ref
+                                                  : abs_diff;
+                printf("[SDPA DBG chk paged] wg_j0=%u k0=%d past_len=%d "
+                       "d=%d q_col=%d k_row=%d  ugemm=%.6f reference=%.6f "
+                       "abs=%.6f rel=%.6f  %s\n",
+                       wg_j0, k0, past_len, d, q_col, k_row,
+                       s_00_from_tile, ref, abs_diff, rel,
+                       rel < 1e-2f ? "OK" : "MISMATCH");
+            }
+        }
+    #endif
 #else
         s_tile_type S_tile
                 = ugemm_kq(K, ldk, Q_slm, D_MAX, causal_k, ugemm_kq_wg_tile_n, d, k0,
@@ -684,6 +772,8 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
         #endif
                 );
 #endif
+
+        /* -------- end DEBUG STUB -------- */
 
 #if KEY_SCALES == QUANTIZE_COMMON
 #define k_scale_op(x) ((x)*k_scale)

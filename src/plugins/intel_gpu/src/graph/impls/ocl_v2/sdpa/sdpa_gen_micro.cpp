@@ -445,6 +445,11 @@ sdpa_config_t xe3_h512_2nd = {32, 16, 32, 16, 16, 1, 16, 1};
 sdpa_config_t xe3_q_h512_2nd = {32, 16, 32, 16, 16, 1, 16, 1};
 
 sdpa_config_t* choose_config_xehpg(int head_size, int seq, bool thin_q, bool quantized, bool is_pa, bool is_prefill) {
+    static bool is_first = true;
+    if (is_first) {
+        GPU_DEBUG_COUT << "head_size " << head_size << std::endl;
+        is_first = false;
+    }
     if (head_size <= 32) {
         if (seq <= 0 && is_pa)
             return &xehpg_h32_pa;
@@ -1532,6 +1537,7 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
     switch (device_info.arch) {
     case gpu_arch::xe_hpg: {
         config = choose_config_xehpg(static_cast<int32_t>(k_head_size), nkeys_v, thin_q, is_quantized, is_paged_attention, is_prefill);
+        // print chosen config once for debugging
         break;
     }
     case gpu_arch::xe2:
@@ -1545,6 +1551,36 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
         config = choose_config_xe2(static_cast<int32_t>(k_head_size), nkeys_v, thin_q, is_quantized, is_integrated, is_paged_attention, is_prefill);
         break;
     }
+    }
+
+    // read environment variable A, B, C, D and override config->wg_m_kq, config->wg_n_kq, config->wg_m_vs, config->wg_n_vs if they are set
+    const char* env_wg_m_kq = std::getenv("AA");
+    const char* env_wg_n_kq = std::getenv("BB");
+    const char* env_wg_m_vs = std::getenv("CC");
+    const char* env_wg_n_vs = std::getenv("DD");
+    if (!is_prefill) {
+        if (env_wg_m_kq != nullptr) {
+            config->wg_m_kq = std::stoi(env_wg_m_kq);
+        }
+        if (env_wg_n_kq != nullptr) {
+            config->wg_n_kq = std::stoi(env_wg_n_kq);
+        }
+        if (env_wg_m_vs != nullptr) {
+            config->wg_m_vs = std::stoi(env_wg_m_vs);
+        }
+        if (env_wg_n_vs != nullptr) {
+            config->wg_n_vs = std::stoi(env_wg_n_vs);
+        }
+    }
+    static bool is_first = true;
+    if (is_first && !is_prefill) {
+        GPU_DEBUG_COUT << "is_prefill=" << is_prefill << " single_token " << is_gqa_single_token << " Chosen config for xe_hpg: "
+                << config->wg_m_kq << ", "
+                << config->wg_n_kq << ", "
+                << config->wg_m_vs << ", "
+                << config->wg_n_vs << ", "
+                << std::endl;
+        is_first = false;
     }
 
     OPENVINO_ASSERT(config != nullptr);
