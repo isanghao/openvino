@@ -182,6 +182,9 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
         , const global VAL_ATTR_SCALES_DATA_T *V_scales
         , const global VAL_ATTR_ZP_DATA_T *V_zp
 #endif
+#ifdef DUMP_UGEMM_TILE
+        , global int *dbg_buffer
+#endif
         ) {
 #if IS_PAGED_ATTENTION
     const uint query_block_idx = get_group_id(0) << 1;
@@ -671,6 +674,130 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
             break;
         }
     #endif
+        /* Implement dump logic here */
+#ifdef DUMP_UGEMM_TILE
+        /* Dump one KQ sub-tile (WG(0,0,0), sg_ij==0, first k iter) into
+         * dbg_buffer for offline validation. Layout: 16 int32 header,
+         * then K[sg_tile_m,d] row-major fp32, Q[sg_tile_n,d] row-major fp32,
+         * S[sg_tile_m,sg_tile_n] column-major fp32. */
+    #if !IS_GQA_SINGLE_TOKEN
+        if (get_group_id(0) == 0 && get_group_id(1) == 0
+                && get_group_id(2) == 0 && sg_ij == 0
+                && k0 == window_k0_begin) {
+            const int sg_tile_m_v = ugemm_kq_sg_tile_m;
+            const int sg_tile_n_v = ugemm_kq_sg_tile_n;
+            const int hdr_ints = 20;
+            global int *hdr = dbg_buffer;
+            global float *K_out = (global float *)(dbg_buffer + hdr_ints);
+            global float *Q_out = K_out + sg_tile_m_v * d;
+            global float *S_out = Q_out + sg_tile_n_v * d;
+
+            if (get_sub_group_local_id() == 0) {
+                hdr[0]  = (int)0xDEADBEEF;
+                hdr[1]  = past_len;
+                hdr[2]  = d;
+                hdr[3]  = k0;
+                hdr[4]  = (int)wg_j0;
+                hdr[5]  = sg_tile_m_v;
+                hdr[6]  = sg_tile_n_v;
+                hdr[7]  = KV_HEADS_NUM;
+                hdr[8]  = (int)base_block_index;
+                hdr[9]  = (int)b0_kv;
+                hdr[10] = k_chunk;
+                hdr[11] = ADJUSTED_K_HEAD_SIZE;
+                hdr[12] = ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE;
+                hdr[13] = PAGED_ATTENTION_BLOCK_SIZE;
+    #if IS_INT4_KV_CACHE
+                hdr[14] = 1;
+    #else
+                hdr[14] = 0;
+    #endif
+                hdr[15] = (int)0xCAFEBABE;
+                hdr[16] = min(sg_tile_m_v, causal_k - k0);  /* valid_k rows */
+                hdr[17] = min(sg_tile_n_v, q - (int)wg_j0); /* valid_q cols */
+                hdr[18] = causal_k;
+                hdr[19] = q;
+
+                for (int i = 0; i < sg_tile_m_v; i++) {
+                    const int k_row = k0 + i;
+                    if (k_row >= causal_k) {
+                        for (int dd = 0; dd < d; dd++)
+                            K_out[i * d + dd] = 0.0f;
+                        continue;
+                    }
+                    if (k_row < past_len) {
+                        const int bidx = k_row / PAGED_ATTENTION_BLOCK_SIZE;
+                        const int within = k_row % PAGED_ATTENTION_BLOCK_SIZE;
+                        const int block_id = block_indices[base_block_index + bidx];
+                        const size_t block_off = (size_t)KV_HEADS_NUM
+                                * ADJUSTED_K_HEAD_SIZE
+                                * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                                * (size_t)block_id;
+    #if IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL
+                        const global uchar *Kblk_u8 = (const global uchar *)(K + block_off);
+                        for (int dd = 0; dd < d; dd++) {
+                            const int col_off_bytes = dd * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE;
+                            const uchar packed = Kblk_u8[col_off_bytes + (within >> 1)];
+                            const int u4_val = ((within & 1) == 0)
+                                    ? (packed & 0x0F)
+                                    : ((packed >> 4) & 0x0F);
+                            const global half *sz = (const global half *)(Kblk_u8
+                                    + col_off_bytes
+                                    + (PAGED_ATTENTION_BLOCK_SIZE >> 1));
+                            const float k_scale_v = convert_float(sz[0]);
+                            const float k_zp_v = convert_float(sz[1]);
+                            K_out[i * d + dd] = ((float)u4_val - k_zp_v) * k_scale_v;
+                        }
+    #elif !defined(IS_KV_COMPRESSED_PA)
+                        const global half *Kblk = (const global half *)(K + block_off);
+                        for (int dd = 0; dd < d; dd++) {
+                            K_out[i * d + dd] = convert_float(
+                                    Kblk[dd * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE + within]);
+                        }
+    #else
+                        for (int dd = 0; dd < d; dd++)
+                            K_out[i * d + dd] = as_float((uint)0x7FC00000);
+    #endif
+                    } else {
+                        const int new_idx = k_row - past_len;
+                        for (int dd = 0; dd < d; dd++) {
+                            K_out[i * d + dd] = convert_float(
+                                    ((const global half *)Kc)[new_idx * ldkc + dd]);
+                        }
+                    }
+                }
+
+                for (int j = 0; j < sg_tile_n_v; j++) {
+                    const int q_col = (int)wg_j0 + j;
+                    if (q_col >= q) {
+                        for (int dd = 0; dd < d; dd++)
+                            Q_out[j * d + dd] = 0.0f;
+                        continue;
+                    }
+                    for (int dd = 0; dd < d; dd++) {
+                        Q_out[j * d + dd] = convert_float(
+                                ((const global half *)Q)[q_col * ldq + dd]);
+                    }
+                }
+            }
+
+            /* S sub-tile: distributed across sub-group lanes; each lane
+             * writes the elements it owns via tile_access. The ugemm KQ
+             * C-tile has its "i0" axis = n (q cols) and "j" axis = m
+             * (k rows), so we iterate k in the outer loop and q cols in
+             * the inner (lane-parallel) loop and store row-major. */
+            for (int k_i = 0; k_i < sg_tile_m_v; k_i++) {
+                for (int c0 = 0; c0 < sg_tile_n_v; c0 += SUBGROUP_SIZE) {
+                    const int c = c0 + get_sub_group_local_id();
+                    const float v = tile_access(S_tile, c0, k_i, SUBGROUP_SIZE,
+                            ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                            ugemm_kq_c_type_nblock0);
+                    S_out[k_i * sg_tile_n_v + c] = v;
+                }
+            }
+        }
+    #endif
+#endif
         /* --------------------------------------------------------------
          * Micro-GEMM integrity check for one S element.
          *

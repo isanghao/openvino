@@ -11,7 +11,11 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <atomic>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "../primitive_ocl_base.hpp"
@@ -33,6 +37,22 @@ constexpr size_t paged_attention_block_size = 16;
 constexpr size_t seq_len_partition_size = 256;
 constexpr size_t subgroup_size = 16;
 constexpr size_t u4_elems_per_byte = 2;
+
+// Debug-only KQ tile dump for sdpa_micro. Enabled by env var
+// OV_GPU_DUMP_SDPA_MICRO_TILE=<file-prefix>. Must stay in sync with the
+// dump path in sdpa_gen_micro.cpp (kSdpaMicroDumpBufferIdx == 4).
+constexpr size_t sdpa_micro_dump_buffer_idx = 4;
+constexpr size_t sdpa_micro_dump_buffer_size = 1024 * 1024;  // 1 MiB, sized for the largest supported tile.
+
+inline const char* sdpa_micro_dump_path() {
+    static const char* p = std::getenv("OV_GPU_DUMP_SDPA_MICRO_TILE");
+    return p;
+}
+
+inline bool sdpa_micro_dump_enabled() {
+    const char* p = sdpa_micro_dump_path();
+    return p != nullptr && p[0] != '\0';
+}
 
 inline bool get_kv_compressed(const RuntimeParams& params) {
     auto key_cache_layout = params.input_layouts[PagedAttentionInputIdx::KEY_CACHE];
@@ -1577,6 +1597,12 @@ public:
             if (num_of_partitions > 1 && !rt_params->use_micro_sdpa) {
                 res_event = {execute_stage(res_event, instance, multi_tokens_mode ? pa_multi_token_finalization : pa_single_token_finalization)};
             }
+
+#ifdef ENABLE_ONEDNN_FOR_GPU
+            if (sdpa_micro_dump_enabled() && multi_tokens_mode && rt_params->use_micro_sdpa) {
+                dump_sdpa_micro_tile_buffer(instance, res_event);
+            }
+#endif
         }
 
         if (has_scores_output) {
@@ -1777,6 +1803,18 @@ public:
             const auto target_seq_len = std::max(paged_attention_aligned_seq_len, static_cast<int64_t>(1));
             const auto indexes_buf_size = ceil_div(target_seq_len, wg_tile_q) * 2;
             internal_buffers.emplace_back(indexes_buf_size * 4, indexes_dt, lockable, not_shareable);
+        }
+
+        // Debug KQ-tile dump buffer for sdpa_micro (MIXED stage). Must be at the
+        // fixed index `sdpa_micro_dump_buffer_idx` so it matches the INTERNAL_BUFFER
+        // argument declared by SDPAMicroGenerator.
+        if (sdpa_micro_dump_enabled() && can_use_micro_sdpa && stage == PagedAttentionStage::MIXED) {
+            OPENVINO_ASSERT(internal_buffers.size() == sdpa_micro_dump_buffer_idx,
+                            "[GPU] sdpa_micro dump buffer index mismatch: got ",
+                            internal_buffers.size(),
+                            " expected ",
+                            sdpa_micro_dump_buffer_idx);
+            internal_buffers.emplace_back(sdpa_micro_dump_buffer_size, indexes_dt, lockable, not_shareable);
         }
 #endif
 
@@ -2010,6 +2048,43 @@ public:
             }
         }
     }
+
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    // Read the sdpa_micro KQ-tile debug buffer and append it to a file. The
+    // buffer is populated by sdpa_micro.cl only when built with -DDUMP_UGEMM_TILE.
+    static void dump_sdpa_micro_tile_buffer(primitive_inst& instance, const std::vector<event::ptr>& res_event) {
+        const auto& intermediates = instance.get_intermediates_memories();
+        if (intermediates.size() <= sdpa_micro_dump_buffer_idx)
+            return;
+        auto dump_mem = intermediates[sdpa_micro_dump_buffer_idx];
+        if (!dump_mem)
+            return;
+
+        for (const auto& e : res_event) {
+            if (e)
+                e->wait();
+        }
+
+        static std::atomic<size_t> dump_seq{0};
+        constexpr size_t kMaxDumps = 8;
+        const size_t seq = dump_seq.fetch_add(1);
+        if (seq >= kMaxDumps)
+            return;
+
+        auto& stream = instance.get_network().get_stream();
+        mem_lock<uint8_t, mem_lock_type::read> lock(dump_mem, stream);
+
+        const std::string prefix = sdpa_micro_dump_path();
+        const std::string fname = prefix + "_" + std::to_string(seq) + ".bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        if (!ofs) {
+            GPU_DEBUG_TRACE_DETAIL << "[sdpa_micro dump] failed to open " << fname << std::endl;
+            return;
+        }
+        ofs.write(reinterpret_cast<const char*>(lock.data()), static_cast<std::streamsize>(dump_mem->size()));
+        GPU_DEBUG_TRACE_DETAIL << "[sdpa_micro dump] wrote " << dump_mem->size() << " bytes to " << fname << std::endl;
+    }
+#endif
 
     [[nodiscard]] std::unique_ptr<primitive_impl> clone() const override {
         return make_deep_copy<PagedAttentionOptImpl>(this);

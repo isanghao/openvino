@@ -21,6 +21,23 @@
 // clang-format on
 namespace ov::intel_gpu::ocl {
 namespace {
+
+// Enabled by setting `OV_GPU_DUMP_SDPA_MICRO_TILE` to a directory/file prefix.
+// When set, the SDPA-micro paged !prefill kernel dumps one KQ tile per launch
+// (WG(0,0,0), sg 0, first k iter) into an extra internal buffer that
+// PagedAttentionOptImpl writes to disk for offline validation.
+inline bool sdpa_micro_dump_enabled() {
+    static const bool enabled = [] {
+        const char* p = std::getenv("OV_GPU_DUMP_SDPA_MICRO_TILE");
+        return p != nullptr && p[0] != '\0';
+    }();
+    return enabled;
+}
+
+// Fixed slot in intermediates_memories used by the dump path.
+// Kept in sync with PagedAttentionOptImpl::get_internal_buffer_descs.
+constexpr uint32_t kSdpaMicroDumpBufferIdx = 4;
+
 size_t get_subgroup_size(gpu_arch arch) {
     switch (arch) {
     case gpu_arch::gen9:
@@ -826,6 +843,9 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     extra_options += " -Dcl_intel_global_float_atomic";
     extra_options += " -Dcl_intel_subgroup_matrix_multiply_accumulate";
     extra_options += " -Dcl_intel_subgroup_split_matrix_multiply_accumulate";
+    if (sdpa_micro_dump_enabled() && !m_is_prefill && !m_is_gqa_single_token) {
+        extra_options += " -DDUMP_UGEMM_TILE=1";
+    }
 
     return base_options + extra_options;
 }
@@ -1409,6 +1429,10 @@ Arguments SDPAMicroGenerator::get_arguments_desc(const kernel_impl_params& param
         args.push_back({ArgumentDescriptor::Types::INPUT, input_idx + 1});  // V scales
         if (is_asym_quantization)
             args.push_back({ArgumentDescriptor::Types::INPUT, input_idx + 3});  // V zp
+    }
+
+    if (sdpa_micro_dump_enabled() && !m_is_prefill && !m_is_gqa_single_token && config.is_paged_attention) {
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, kSdpaMicroDumpBufferIdx});  // dbg_buffer
     }
 
     return args;
