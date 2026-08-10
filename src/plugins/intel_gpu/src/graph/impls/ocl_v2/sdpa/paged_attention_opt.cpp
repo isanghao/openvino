@@ -1574,6 +1574,12 @@ public:
             else
 #endif
                 res_event = {execute_stage(res_event, instance, pa_sdpa_opt)};
+
+#ifdef ENABLE_ONEDNN_FOR_GPU
+            if (sdpa_micro_dump_enabled() && rt_params->use_micro_sdpa) {
+                dump_sdpa_micro_tile_buffer(instance, res_event);
+            }
+#endif
         } else if (rt_params->stage == PagedAttentionStage::GENERATE || rt_params->stage == PagedAttentionStage::MIXED) {
             const auto multi_tokens_mode = rt_params->stage == PagedAttentionStage::MIXED;
             auto num_of_partitions = rt_params->num_of_partitions;
@@ -1798,10 +1804,11 @@ public:
             internal_buffers.emplace_back(indexes_buf_size * 4, indexes_dt, lockable, not_shareable);
         }
 
-        // Debug KQ-tile dump buffer for sdpa_micro (MIXED stage). Must be at the
-        // fixed index `sdpa_micro_dump_buffer_idx` so it matches the INTERNAL_BUFFER
-        // argument declared by SDPAMicroGenerator.
-        if (sdpa_micro_dump_enabled() && can_use_micro_sdpa && stage == PagedAttentionStage::MIXED) {
+        // Debug KQ-tile dump buffer for sdpa_micro (PREFILL or MIXED stage).
+        // Must be at the fixed index `sdpa_micro_dump_buffer_idx` so it matches
+        // the INTERNAL_BUFFER argument declared by SDPAMicroGenerator.
+        if (sdpa_micro_dump_enabled() && can_use_micro_sdpa &&
+            (stage == PagedAttentionStage::PREFILL || stage == PagedAttentionStage::MIXED)) {
             OPENVINO_ASSERT(internal_buffers.size() == sdpa_micro_dump_buffer_idx,
                             "[GPU] sdpa_micro dump buffer index mismatch: got ",
                             internal_buffers.size(),

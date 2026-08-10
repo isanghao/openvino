@@ -843,7 +843,7 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     extra_options += " -Dcl_intel_global_float_atomic";
     extra_options += " -Dcl_intel_subgroup_matrix_multiply_accumulate";
     extra_options += " -Dcl_intel_subgroup_split_matrix_multiply_accumulate";
-    if (sdpa_micro_dump_enabled() && !m_is_prefill && !m_is_gqa_single_token) {
+    if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token) {
         extra_options += " -DDUMP_UGEMM_TILE=1";
     }
 
@@ -1431,7 +1431,7 @@ Arguments SDPAMicroGenerator::get_arguments_desc(const kernel_impl_params& param
             args.push_back({ArgumentDescriptor::Types::INPUT, input_idx + 3});  // V zp
     }
 
-    if (sdpa_micro_dump_enabled() && !m_is_prefill && !m_is_gqa_single_token && config.is_paged_attention) {
+    if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token && config.is_paged_attention) {
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, kSdpaMicroDumpBufferIdx});  // dbg_buffer
     }
 
