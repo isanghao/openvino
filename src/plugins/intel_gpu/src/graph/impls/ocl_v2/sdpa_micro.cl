@@ -840,6 +840,28 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
         if (get_group_id(0) == 0 && get_group_id(1) == 0
                 && get_group_id(2) == 0 && sg_ij == 0
                 && k0 == window_k0_begin) {
+            if (get_sub_group_local_id() == 0) {
+                printf("[SDPA DBG layout] sg_tile_m=%d sg_tile_n=%d "
+                       "SUBGROUP_SIZE=%d c_block0=%d c_block1=%d "
+                       "c_nblock0=%d c_nblock1=%d sg_per_wg_m=%d sg_per_wg_n=%d\n",
+                       ugemm_kq_sg_tile_m, ugemm_kq_sg_tile_n, SUBGROUP_SIZE,
+                       ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                       ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1,
+                       ugemm_kq_sg_per_wg_m, ugemm_kq_sg_per_wg_n);
+                /* Dump lane 0's raw C-tile storage. With c_block0=16,
+                 * c_block1=8, c_nblock0=1, c_nblock1=2 the per-lane storage
+                 * is t.x[nbr*nbc=2][block0*block1/sg=8]. Lane 0 owns i0=0
+                 * (q_col=0). Slots along t.x[b][s] map to j=b*bc+s (k_row). */
+                for (int b = 0; b < ugemm_kq_c_type_nblock0 * ugemm_kq_c_type_nblock1; b++) {
+                    printf("[SDPA DBG raw] lane0 b=%d :"
+                           " %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+                           b,
+                           (float)S_tile.x[b][0], (float)S_tile.x[b][1],
+                           (float)S_tile.x[b][2], (float)S_tile.x[b][3],
+                           (float)S_tile.x[b][4], (float)S_tile.x[b][5],
+                           (float)S_tile.x[b][6], (float)S_tile.x[b][7]);
+                }
+            }
             const int q_col = (int)wg_j0;                 /* sg_j0_kq==0 */
             int ok_count = 0;
             int fail_count = 0;
