@@ -832,18 +832,29 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
          */
     #if !defined(IS_KV_COMPRESSED_PA) \
             || (IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL)
+        /* Per-row KQ integrity walk for sg 0's sub-tile at q_col = wg_j0.
+         * The KQ C-tile's i0-axis is q col (n) and j-axis is k row (m),
+         * matching tile_vreduce_max / tile_predicated_assignment_t.
+         * xlane_tile_access requires whole-subgroup participation; only
+         * lane 0 prints the result. */
         if (get_group_id(0) == 0 && get_group_id(1) == 0
                 && get_group_id(2) == 0 && sg_ij == 0
                 && k0 == window_k0_begin) {
-            /* All lanes of the subgroup must participate. */
-            const float s_00_from_tile = xlane_tile_access(S_tile,
-                    /* i */ 0, /* j */ 0, SUBGROUP_SIZE,
-                    ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
-                    ugemm_kq_c_type_nblock0);
-
-            if (get_sub_group_local_id() == 0) {
-                const int k_row = k0;                     /* sg_i0_kq==0 */
-                const int q_col = (int)wg_j0;             /* sg_j0_kq==0 */
+            const int q_col = (int)wg_j0;                 /* sg_j0_kq==0 */
+            int ok_count = 0;
+            int fail_count = 0;
+            float first_fail_ref = 0.0f;
+            float first_fail_got = 0.0f;
+            int first_fail_row = -1;
+            for (int i_row = 0; i_row < ugemm_kq_sg_tile_m; i_row++) {
+                const float s_i0_from_tile = xlane_tile_access(S_tile,
+                        /* i (q col) */ 0, /* j (k row) */ i_row,
+                        SUBGROUP_SIZE,
+                        ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                        ugemm_kq_c_type_nblock0);
+                const int k_row = k0 + i_row;             /* sg_i0_kq==0 */
+                if (k_row >= causal_k) continue;
+                if (get_sub_group_local_id() != 0) continue;
                 float ref = 0.0f;
                 for (int dd = 0; dd < d; dd++) {
                     float k_v;
@@ -903,17 +914,35 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                             ((const global half *)Q)[q_col * ldq + dd]);
                     ref += k_v * q_v;
                 }
-                const float diff = s_00_from_tile - ref;
+                const float diff = s_i0_from_tile - ref;
                 const float abs_diff = diff < 0 ? -diff : diff;
                 const float abs_ref = ref < 0 ? -ref : ref;
                 const float rel = abs_ref > 1e-6f ? abs_diff / abs_ref
                                                   : abs_diff;
-                printf("[SDPA DBG chk paged] wg_j0=%u k0=%d past_len=%d "
-                       "d=%d q_col=%d k_row=%d  ugemm=%.6f reference=%.6f "
-                       "abs=%.6f rel=%.6f  %s\n",
-                       wg_j0, k0, past_len, d, q_col, k_row,
-                       s_00_from_tile, ref, abs_diff, rel,
-                       rel < 1e-2f ? "OK" : "MISMATCH");
+                const bool row_ok = rel < 1e-2f;
+                if (row_ok) {
+                    ok_count++;
+                } else {
+                    if (first_fail_row < 0) {
+                        first_fail_row = k_row;
+                        first_fail_ref = ref;
+                        first_fail_got = s_i0_from_tile;
+                    }
+                    fail_count++;
+                }
+                printf("[SDPA DBG chk paged row] wg_j0=%u k0=%d k_row=%d "
+                       "q_col=%d ugemm=%.6f reference=%.6f abs=%.6f rel=%.6f "
+                       "%s\n",
+                       wg_j0, k0, k_row, q_col, s_i0_from_tile, ref,
+                       abs_diff, rel, row_ok ? "OK" : "MISMATCH");
+            }
+            if (get_sub_group_local_id() == 0) {
+                printf("[SDPA DBG chk paged summary] sg_tile_m=%d "
+                       "wg_m_kq=%d ok=%d fail=%d first_fail_row=%d "
+                       "first_fail got=%.6f ref=%.6f\n",
+                       ugemm_kq_sg_tile_m, ugemm_kq_sg_per_wg_m,
+                       ok_count, fail_count, first_fail_row,
+                       first_fail_got, first_fail_ref);
             }
         }
     #endif
