@@ -124,6 +124,28 @@ def load_tile(path: str):
     return hdr, K, Q, S
 
 
+def dump_tile_data(path: str, hdr: Header, K: np.ndarray, Q: np.ndarray,
+                    S: np.ndarray, dump_dir: str) -> None:
+    """Save the raw K/Q/S tile data and the recomputed reference S as .npy
+    (for reloading) and .txt (for manual eyeballing) files under dump_dir."""
+    os.makedirs(dump_dir, exist_ok=True)
+    base = os.path.join(dump_dir, os.path.splitext(os.path.basename(path))[0])
+
+    vk = max(0, min(hdr.valid_k, hdr.sg_tile_m))
+    vq = max(0, min(hdr.valid_q, hdr.sg_tile_n))
+    ref = K[:vk].astype(np.float64) @ Q[:vq].astype(np.float64).T if vk and vq else np.zeros((0, 0))
+
+    for name, arr in (("K", K), ("Q", Q), ("S", S), ("S_ref", ref)):
+        np.save(f"{base}_{name}.npy", arr)
+        np.savetxt(f"{base}_{name}.txt", arr, fmt="%.6g")
+
+    with open(f"{base}_header.txt", "w") as f:
+        for field, value in vars(hdr).items():
+            f.write(f"{field} = {value}\n")
+
+    print(f"  [dump] wrote K/Q/S/S_ref (.npy + .txt) and header to {dump_dir}/ (prefix: {os.path.basename(base)})")
+
+
 def compare(hdr: Header, K: np.ndarray, Q: np.ndarray, S: np.ndarray,
             atol: float, rtol: float) -> int:
     # Clip to in-bounds portion of the tile; ugemm output beyond valid_k/valid_q
@@ -479,6 +501,10 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--heads", type=int, default=None,
                     help="Override the number of Q heads (else inferred from "
                          "Q_BIN's feature dim / head_size).")
+    ap.add_argument("--dump-dir", metavar="DIR",
+                    help="Dump the raw K/Q/S tile data and the recomputed "
+                         "reference S as .npy and .txt files under DIR, one "
+                         "set per input file, for manual inspection.")
     args = ap.parse_args(argv)
 
     rc = 0
@@ -495,6 +521,8 @@ def main(argv: List[str]) -> int:
             rc |= 2
             continue
         rc |= compare(hdr, K, Q, S, args.atol, args.rtol)
+        if args.dump_dir:
+            dump_tile_data(path, hdr, K, Q, S, args.dump_dir)
         if args.inputs:
             rc |= compare_inputs(hdr, K, Q, args.inputs[0], args.inputs[1],
                                  args.inputs[2], args.heads)

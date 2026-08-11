@@ -185,6 +185,9 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
 #ifdef DUMP_UGEMM_TILE
         , global int *dbg_buffer
 #endif
+#ifdef TRANSPOSE_KV_CACHE
+        , global half *K_stage
+#endif
         ) {
 #if IS_PAGED_ATTENTION
     const uint query_block_idx = get_group_id(0) << 1;
@@ -620,6 +623,94 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
 
         /* Calculate S = (K^T) * Q */
 #if IS_PAGED_ATTENTION && !IS_PREFILL
+/* Diagnostic path for the paged non-prefill K*Q. Enabled by setting
+   OV_GPU_SDPA_TRANSPOSE_KV_CACHE at build time. Cooperatively decodes
+   past-K from the paged block cache (and dequantizes for u4 BY_CHANNEL)
+   into a per-WG token-major fp16 scratch buffer `K_stage_wg`, then calls
+   the Layout::T `ugemm_kcq` on it - the same microkernel that already
+   handles new-K on `Kc`. This isolates whether ugemm_kq (Layout::N) on
+   the paged block layout is the source of accuracy bugs, by A/B-comparing
+   against `ugemm_kcq` (Layout::T) on the same K values. Slow, diagnostic
+   only. Supported layouts: fp16 uncompressed and u4 BY_CHANNEL. */
+    #if !IS_GQA_SINGLE_TOKEN \
+        && defined(TRANSPOSE_KV_CACHE) \
+        && (!defined(IS_KV_COMPRESSED_PA) \
+            || (IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL))
+        s_tile_type S_tile;
+        tile_fill(S_tile, 0.0f);
+        {
+            /* Locate this WG's slice inside K_stage. Row-major layout
+               [wg_tile_m, HEAD_SIZE], fp16, row stride = HEAD_SIZE. */
+            const uint wg_lin_id = ((get_group_id(0) * get_num_groups(1))
+                                    + get_group_id(1)) * get_num_groups(2)
+                                   + get_group_id(2);
+            global half *K_stage_wg = K_stage
+                    + (size_t)wg_lin_id * ugemm_kq_wg_tile_m * HEAD_SIZE;
+
+            const int past = past_lens[gws_mapping];
+            const int k_stage_rows = k_chunk;
+            const uint total_elems = (uint)k_stage_rows * (uint)HEAD_SIZE;
+            const uint wi_lin = sg_ij * SUBGROUP_SIZE
+                    + get_sub_group_local_id();
+            const uint wi_stride = sg_per_wg * SUBGROUP_SIZE;
+
+            /* Cooperatively decode/transpose K for this iteration into
+               K_stage_wg (past-K from paged blocks, new-K from Kc). */
+            for (uint idx = wi_lin; idx < total_elems; idx += wi_stride) {
+                const int i_row = (int)(idx / (uint)HEAD_SIZE);
+                const int dd    = (int)(idx % (uint)HEAD_SIZE);
+                const int k_row = k0 + i_row;
+                half k_val = (half)0;
+                if (k_row < past) {
+                    const int bidx = k_row / PAGED_ATTENTION_BLOCK_SIZE;
+                    const int within = k_row % PAGED_ATTENTION_BLOCK_SIZE;
+                    const int block_id =
+                            block_indices[base_block_index + bidx];
+                    const size_t block_off = (size_t)KV_HEADS_NUM
+                            * ADJUSTED_K_HEAD_SIZE
+                            * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                            * (size_t)block_id;
+    #if IS_INT4_KV_CACHE && IS_KEY_BY_CHANNEL
+                    const global uchar *Kblk_u8
+                            = (const global uchar *)(K + block_off);
+                    const int col_off_bytes
+                            = dd * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE;
+                    const uchar packed
+                            = Kblk_u8[col_off_bytes + (within >> 1)];
+                    const int u4_val = ((within & 1) == 0)
+                            ? (packed & 0x0F)
+                            : ((packed >> 4) & 0x0F);
+                    const global half *sz = (const global half *)(Kblk_u8
+                            + col_off_bytes
+                            + (PAGED_ATTENTION_BLOCK_SIZE >> 1));
+                    k_val = convert_half(((float)u4_val
+                                    - convert_float(sz[1]))
+                            * convert_float(sz[0]));
+    #else
+                    const global half *Kblk
+                            = (const global half *)(K + block_off);
+                    k_val = Kblk[dd * ADJUSTED_PAGED_ATTENTION_BLOCK_SIZE
+                            + within];
+    #endif
+                } else if (k_row < causal_k) {
+                    const int new_idx = k_row - past;
+                    k_val = ((const global half *)Kc)[new_idx * ldkc + dd];
+                }
+                K_stage_wg[i_row * HEAD_SIZE + dd] = k_val;
+            }
+
+            /* Ensure all lanes see the staged K before ugemm_kcq reads it. */
+            barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE);
+
+            /* Run the Layout::T microkernel on the staged transposed K. */
+            s_tile_type S_tile1 = ugemm_kcq(
+                    K_stage_wg, HEAD_SIZE, Q_slm, D_MAX,
+                    k_stage_rows, ugemm_kq_wg_tile_n, d,
+                    0, 0, 0,
+                    sg_i_kq, sg_j_kq, (local char *)ugemm_slm);
+            tile_binary(S_tile, S_tile1, binary_add);
+        }
+    #else /* original ugemm_kq (past-K) + ugemm_kcq (new-K) path */
     #if !IS_GQA_SINGLE_TOKEN
         s_tile_type S_tile;
         tile_fill(S_tile, 0.0f);
@@ -674,6 +765,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
             break;
         }
     #endif
+    #endif /* TRANSPOSE_KV_CACHE */
         /* Implement dump logic here */
 #ifdef DUMP_UGEMM_TILE
         /* Dump one KQ sub-tile (WG(0,0,0), sg_ij==0, first k iter) into

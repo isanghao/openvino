@@ -54,6 +54,22 @@ inline bool sdpa_micro_dump_enabled() {
     return p != nullptr && p[0] != '\0';
 }
 
+// Diagnostic: force past-K to be transposed into a per-WG fp16 scratch buffer
+// and consumed via ugemm_kcq (Layout::T) instead of ugemm_kq (Layout::N).
+// Enabled by env var OV_GPU_SDPA_TRANSPOSE_KV_CACHE. Must stay in sync with
+// sdpa_gen_micro.cpp.
+constexpr size_t sdpa_micro_kv_stage_buffer_size = 1024 * 1024;  // 1 MiB per launch.
+inline bool sdpa_micro_transpose_kv_cache_enabled() {
+    static const bool enabled = [] {
+        const char* p = std::getenv("OV_GPU_SDPA_TRANSPOSE_KV_CACHE");
+        return p != nullptr && p[0] != '\0';
+    }();
+    return enabled;
+}
+inline size_t sdpa_micro_kv_stage_buffer_idx() {
+    return sdpa_micro_dump_enabled() ? 5 : 4;
+}
+
 inline bool get_kv_compressed(const RuntimeParams& params) {
     auto key_cache_layout = params.input_layouts[PagedAttentionInputIdx::KEY_CACHE];
     if (data_type_traits::is_i8_u8(key_cache_layout.data_type) || data_type_traits::is_i4_u4(key_cache_layout.data_type)) {
@@ -1815,6 +1831,24 @@ public:
                             " expected ",
                             sdpa_micro_dump_buffer_idx);
             internal_buffers.emplace_back(sdpa_micro_dump_buffer_size, indexes_dt, lockable, not_shareable);
+        }
+
+        // Diagnostic transposed-KV-cache staging buffer for sdpa_micro
+        // (GENERATE or MIXED stage). Must land at
+        // `sdpa_micro_kv_stage_buffer_idx()`, matching SDPAMicroGenerator.
+        if (sdpa_micro_transpose_kv_cache_enabled() && can_use_micro_sdpa &&
+            (stage == PagedAttentionStage::GENERATE || stage == PagedAttentionStage::MIXED)) {
+            const size_t target_idx = sdpa_micro_kv_stage_buffer_idx();
+            while (internal_buffers.size() < target_idx) {
+                // Padding so the staging buffer lands at the fixed index.
+                internal_buffers.emplace_back(4, indexes_dt);
+            }
+            OPENVINO_ASSERT(internal_buffers.size() == target_idx,
+                            "[GPU] sdpa_micro kv stage buffer index mismatch: got ",
+                            internal_buffers.size(),
+                            " expected ",
+                            target_idx);
+            internal_buffers.emplace_back(sdpa_micro_kv_stage_buffer_size, indexes_dt, lockable, not_shareable);
         }
 #endif
 

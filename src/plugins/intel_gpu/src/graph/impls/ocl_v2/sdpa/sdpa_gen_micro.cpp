@@ -38,6 +38,24 @@ inline bool sdpa_micro_dump_enabled() {
 // Kept in sync with PagedAttentionOptImpl::get_internal_buffer_descs.
 constexpr uint32_t kSdpaMicroDumpBufferIdx = 4;
 
+// When set, the SDPA-micro paged !prefill kernel replaces the ugemm-based
+// KQ path (Layout::N past-K via ugemm_kq + Layout::T new-K via ugemm_kcq)
+// with a plain OpenCL K^T*Q scalar loop. Diagnostic-only; used to isolate
+// microkernel/layout bugs by A/B-comparing against the ugemm path.
+inline bool sdpa_micro_transpose_kv_cache_enabled() {
+    static const bool enabled = [] {
+        const char* p = std::getenv("OV_GPU_SDPA_TRANSPOSE_KV_CACHE");
+        return p != nullptr && p[0] != '\0';
+    }();
+    return enabled;
+}
+
+// Fixed slot for the diagnostic KV-staging buffer used by TRANSPOSE_KV_CACHE.
+// Kept in sync with PagedAttentionOptImpl::get_internal_buffer_descs.
+inline uint32_t sdpa_micro_kv_stage_buffer_idx() {
+    return sdpa_micro_dump_enabled() ? 5 : 4;
+}
+
 size_t get_subgroup_size(gpu_arch arch) {
     switch (arch) {
     case gpu_arch::gen9:
@@ -846,6 +864,9 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token) {
         extra_options += " -DDUMP_UGEMM_TILE=1";
     }
+    if (sdpa_micro_transpose_kv_cache_enabled() && !m_is_prefill && !m_is_gqa_single_token) {
+        extra_options += " -DTRANSPOSE_KV_CACHE=1";
+    }
 
     return base_options + extra_options;
 }
@@ -1433,6 +1454,10 @@ Arguments SDPAMicroGenerator::get_arguments_desc(const kernel_impl_params& param
 
     if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token && config.is_paged_attention) {
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, kSdpaMicroDumpBufferIdx});  // dbg_buffer
+    }
+
+    if (sdpa_micro_transpose_kv_cache_enabled() && !m_is_prefill && !m_is_gqa_single_token && config.is_paged_attention) {
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, sdpa_micro_kv_stage_buffer_idx()});  // K_stage
     }
 
     return args;
