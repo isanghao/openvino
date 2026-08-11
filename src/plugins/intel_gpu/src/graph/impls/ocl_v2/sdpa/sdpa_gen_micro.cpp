@@ -56,6 +56,17 @@ inline uint32_t sdpa_micro_kv_stage_buffer_idx() {
     return sdpa_micro_dump_enabled() ? 5 : 4;
 }
 
+// When set, the SDPA-micro kernel compiles in the in-kernel integrity checks
+// (per-row K^T*Q reference comparison, ugemm_vs reference check, layout /
+// raw C-tile dumps). Enabled by env var OV_GPU_PA_INTEGRITY_CHECK.
+inline bool sdpa_micro_integrity_check_enabled() {
+    static const bool enabled = [] {
+        const char* p = std::getenv("OV_GPU_PA_INTEGRITY_CHECK");
+        return p != nullptr && p[0] != '\0';
+    }();
+    return enabled;
+}
+
 size_t get_subgroup_size(gpu_arch arch) {
     switch (arch) {
     case gpu_arch::gen9:
@@ -866,6 +877,9 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     }
     if (sdpa_micro_transpose_kv_cache_enabled() && !m_is_prefill && !m_is_gqa_single_token) {
         extra_options += " -DTRANSPOSE_KV_CACHE=1";
+    }
+    if (sdpa_micro_integrity_check_enabled() && !m_is_gqa_single_token) {
+        extra_options += " -DPA_INTEGRITY_CHECK=1";
     }
 
     return base_options + extra_options;

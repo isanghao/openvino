@@ -372,7 +372,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
     local uint *ugemm_slm = (local uint *)&slm[Q_slm_size + S_slm_size
             + S_sum_slm_size + S_max_slm_size];
 
-#ifdef DUMP_UGEMM_TILE
+#ifdef PA_INTEGRITY_CHECK
     /* Flat fp32 snapshot of the softmax'd S tile, populated per-WG right
        before the packed store to S_slm and consumed by the VS integrity
        check. Layout: [k_row, q_col] row-major, ldb = ugemm_kq_wg_tile_n. */
@@ -918,6 +918,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
          * ldkc). Skipped on the IS_GQA_SINGLE_TOKEN sub-path (different
          * Q packing).
          * -------------------------------------------------------------- */
+#ifdef PA_INTEGRITY_CHECK
     #if !IS_GQA_SINGLE_TOKEN
         if (get_global_id(0) == 0 && get_global_id(1) == 0
                 && get_global_id(2) == 0 && is_first) {
@@ -1075,6 +1076,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
         }
     #endif
     #endif
+#endif /* PA_INTEGRITY_CHECK */
 #else
         s_tile_type S_tile
                 = ugemm_kq(K, ldk, Q_slm, D_MAX, causal_k, ugemm_kq_wg_tile_n, d, k0,
@@ -1174,6 +1176,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
         }
     #endif  /* DUMP_UGEMM_TILE */
 
+#ifdef PA_INTEGRITY_CHECK
         /* Per-row KQ integrity walk for sg 0's sub-tile at q_col = wg_j0. */
         if (get_group_id(0) == 0 && get_group_id(1) == 0
                 && get_group_id(2) == 0 && sg_ij == 0
@@ -1243,6 +1246,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                        first_fail_got, first_fail_ref);
             }
         }
+#endif  /* PA_INTEGRITY_CHECK */
 #endif  /* IS_PAGED_ATTENTION && IS_PREFILL */
 #endif
 
@@ -1507,7 +1511,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
 
         /* Convert to half, VNNI format */
         s_tile_type_half2 S_tile_half2;
-#ifdef DUMP_UGEMM_TILE
+#ifdef PA_INTEGRITY_CHECK
         /* Snapshot softmax'd S to S_check_slm before packing to VNNI.
            Each sub-group writes its own (k_row, q_col) slab; the barrier
            following tile_store_t_sys_src2 also publishes these writes. */
@@ -1685,7 +1689,7 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                 #endif
                     );
 
-#ifdef DUMP_UGEMM_TILE
+#ifdef PA_INTEGRITY_CHECK
     /* Integrity check for ugemm_vs. Runs only on WG(0,0,0), sg 0, first
        outer K iteration, first V block. Recomputes A_tile1[d=0, n=0] as
        sum_k V[0, k_local] * S_check_slm[k_local, 0] and compares against
