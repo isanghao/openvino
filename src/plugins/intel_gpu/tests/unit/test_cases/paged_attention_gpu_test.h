@@ -2221,10 +2221,7 @@ public:
             ASSERT_EQ(data_output_mem->count(), std::get<0>(ref_data).size());
             cldnn::mem_lock<ov::float16, cldnn::mem_lock_type::read> mem_ptr(data_output_mem, tests::get_test_stream());
             for (size_t i = 0; i < data_output_mem->count(); i++) {
-                if (fabs(mem_ptr[i] - std::get<0>(ref_data)[i]) > tolerance) {
-                    std::cout << mem_ptr[i] << ", " << std::get<0>(ref_data)[i] << ", " << tolerance << " at index=" << i << std::endl;
-                }
-            }
+                ASSERT_NEAR(mem_ptr[i], std::get<0>(ref_data)[i], tolerance) << " at index=" << i;            }
         }
 
         if (scores_output_mem) {

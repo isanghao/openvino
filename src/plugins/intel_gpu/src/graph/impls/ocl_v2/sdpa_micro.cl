@@ -372,6 +372,13 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
     local uint *ugemm_slm = (local uint *)&slm[Q_slm_size + S_slm_size
             + S_sum_slm_size + S_max_slm_size];
 
+#ifdef DUMP_UGEMM_TILE
+    /* Flat fp32 snapshot of the softmax'd S tile, populated per-WG right
+       before the packed store to S_slm and consumed by the VS integrity
+       check. Layout: [k_row, q_col] row-major, ldb = ugemm_kq_wg_tile_n. */
+    local float S_check_slm[ugemm_kq_wg_tile_m * ugemm_kq_wg_tile_n];
+#endif
+
     const bool need_sum_barrier = (ugemm_vs_barrier_count == 0);
 
     /* Locate K/Q/V/A matrices within batch */
@@ -914,6 +921,9 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
     #if !IS_GQA_SINGLE_TOKEN
         if (get_global_id(0) == 0 && get_global_id(1) == 0
                 && get_global_id(2) == 0 && is_first) {
+            #ifdef TRANSPOSE_KV_CACHE
+            printf("TRANSPOSE_KV_CACHE: ");
+            #endif
             printf("AA: sdpa_micro q %d IS_PREFILL %d IS_GQA_SINGLE_TOKEN %d\n", q, IS_PREFILL, IS_GQA_SINGLE_TOKEN);
             is_first = false;
         }
@@ -1497,6 +1507,31 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
 
         /* Convert to half, VNNI format */
         s_tile_type_half2 S_tile_half2;
+#ifdef DUMP_UGEMM_TILE
+        /* Snapshot softmax'd S to S_check_slm before packing to VNNI.
+           Each sub-group writes its own (k_row, q_col) slab; the barrier
+           following tile_store_t_sys_src2 also publishes these writes. */
+        for (int jj_ck = 0;
+             jj_ck < ugemm_kq_c_type_block1 * ugemm_kq_c_type_nblock1;
+             jj_ck++) {
+            const int k_row_local = (int)sg_i0_kq + jj_ck;
+            if (k_row_local >= ugemm_kq_wg_tile_m) break;
+            for (int ii0_ck = 0;
+                 ii0_ck < ugemm_kq_c_type_block0 * ugemm_kq_c_type_nblock0;
+                 ii0_ck += SUBGROUP_SIZE) {
+                const int ii_ck = ii0_ck + (int)get_sub_group_local_id();
+                const float sval = tile_access(S_tile, ii0_ck, jj_ck,
+                        SUBGROUP_SIZE,
+                        ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                        ugemm_kq_c_type_nblock0);
+                const int q_col_local = (int)sg_j0_kq + ii_ck;
+                if (q_col_local < ugemm_kq_wg_tile_n) {
+                    S_check_slm[k_row_local * ugemm_kq_wg_tile_n
+                            + q_col_local] = sval;
+                }
+            }
+        }
+#endif
         tile_copy_to_half2(S_tile, S_tile_half2);
 
         /* Store to SLM, in packed format */
@@ -1649,6 +1684,66 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
                     , (global half *)Vb0_scales, (global half *)Vb0_zp, ldvq
                 #endif
                     );
+
+#ifdef DUMP_UGEMM_TILE
+    /* Integrity check for ugemm_vs. Runs only on WG(0,0,0), sg 0, first
+       outer K iteration, first V block. Recomputes A_tile1[d=0, n=0] as
+       sum_k V[0, k_local] * S_check_slm[k_local, 0] and compares against
+       the microkernel result. Supports fp16 uncompressed and u4 per-token
+       V; other layouts skip the check. */
+    #if !defined(IS_KV_COMPRESSED_PA) || IS_INT4_KV_CACHE
+            if (get_group_id(0) == 0 && get_group_id(1) == 0
+                    && get_group_id(2) == 0 && sg_ij == 0
+                    && k0 == window_k0_begin && kb0 == 0) {
+                const int d_check = 0;
+                const int n_check = 0;
+                const float a_ugemm = xlane_tile_access(A_tile1,
+                        /* i (d row) */ d_check,
+                        /* j (n col) */ n_check,
+                        SUBGROUP_SIZE,
+                        ugemm_vs_c_type_block0, ugemm_vs_c_type_block1,
+                        ugemm_vs_c_type_nblock0);
+                if (get_sub_group_local_id() == 0) {
+                    float ref = 0.f;
+                    for (int kk = 0; kk < kb_chunk; kk++) {
+                        float v_val;
+        #if IS_INT4_KV_CACHE
+                        const global uchar *V_u8
+                                = (const global uchar *)Vb0;
+                        const int row_off_bytes
+                                = kk * ADJUSTED_V_HEAD_SIZE;
+                        const uchar packed
+                                = V_u8[row_off_bytes + (d_check >> 1)];
+                        const int u4_val = (d_check & 1)
+                                ? ((packed >> 4) & 0x0F)
+                                : (packed & 0x0F);
+                        const global half *vsz = (const global half *)(V_u8
+                                + row_off_bytes + (HEAD_SIZE >> 1));
+                        v_val = ((float)u4_val - convert_float(vsz[1]))
+                                * convert_float(vsz[0]);
+        #else
+                        const global half *V_h = (const global half *)Vb0;
+                        v_val = convert_float(V_h[kk * ldv + d_check]);
+        #endif
+                        const float s_val = S_check_slm[
+                                kk * ugemm_kq_wg_tile_n + n_check];
+                        ref += v_val * s_val;
+                    }
+                    const float diff = a_ugemm - ref;
+                    const float abs_diff = diff < 0 ? -diff : diff;
+                    const float abs_ref = ref < 0 ? -ref : ref;
+                    const float rel = abs_ref > 1e-6f
+                            ? abs_diff / abs_ref : abs_diff;
+                    printf("[SDPA DBG chk paged vs] k0=%d kb0=%d "
+                           "kb_chunk=%d d=%d n=%d ugemm=%.6f "
+                           "reference=%.6f abs=%.6f rel=%.6f %s\n",
+                           k0, kb0, kb_chunk, d_check, n_check,
+                           a_ugemm, ref, abs_diff, rel,
+                           rel < 1e-2f ? "OK" : "MISMATCH");
+                }
+            }
+    #endif
+#endif
 
             tile_binary(A_tile, A_tile1, binary_add);
         }
