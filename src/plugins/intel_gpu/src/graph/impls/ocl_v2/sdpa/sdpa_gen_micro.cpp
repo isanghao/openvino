@@ -21,18 +21,6 @@
 // clang-format on
 namespace ov::intel_gpu::ocl {
 namespace {
-
-// When set, the SDPA-micro kernel compiles in the in-kernel integrity checks
-// (per-row K^T*Q reference comparison, ugemm_vs reference check, layout /
-// raw C-tile dumps). Enabled by env var OV_GPU_PA_INTEGRITY_CHECK.
-inline bool sdpa_micro_integrity_check_enabled() {
-    static const bool enabled = [] {
-        const char* p = std::getenv("OV_GPU_PA_INTEGRITY_CHECK");
-        return p != nullptr && p[0] != '\0';
-    }();
-    return enabled;
-}
-
 size_t get_subgroup_size(gpu_arch arch) {
     switch (arch) {
     case gpu_arch::gen9:
@@ -449,7 +437,7 @@ sdpa_config_t xe2_q_h256_s768_2nd_integrated = {64, 16, 16, 16, 16, 1, 16, 1};
 sdpa_config_t xe2_q_h256_s512_2nd_integrated = {32, 32, 32, 16, 16, 1, 8, 2};
 sdpa_config_t xe2_q_h256_s384_2nd_integrated = {16, 16, 16, 16, 16, 1, 16, 1};
 
-sdpa_config_t xe3_h128 = {16, 16, 16, 16, 8, 2, 8, 2};
+sdpa_config_t xe3_h128 = {32, 16, 32, 16, 16, 2, 16, 2};
 sdpa_config_t xe3_h256 = {32, 16, 32, 16, 16, 2, 16, 2};
 
 sdpa_config_t xe3_h512 = {32, 16, 32, 16, 16, 2, 16, 2};
@@ -457,11 +445,6 @@ sdpa_config_t xe3_h512_2nd = {32, 16, 32, 16, 16, 1, 16, 1};
 sdpa_config_t xe3_q_h512_2nd = {32, 16, 32, 16, 16, 1, 16, 1};
 
 sdpa_config_t* choose_config_xehpg(int head_size, int seq, bool thin_q, bool quantized, bool is_pa, bool is_prefill) {
-    static bool is_first = true;
-    if (is_first) {
-        GPU_DEBUG_COUT << "head_size " << head_size << std::endl;
-        is_first = false;
-    }
     if (head_size <= 32) {
         if (seq <= 0 && is_pa)
             return &xehpg_h32_pa;
@@ -838,7 +821,7 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     extra_options += " -Dcl_intel_global_float_atomic";
     extra_options += " -Dcl_intel_subgroup_matrix_multiply_accumulate";
     extra_options += " -Dcl_intel_subgroup_split_matrix_multiply_accumulate";
-    if (sdpa_micro_integrity_check_enabled() && !m_is_gqa_single_token) {
+    if (params.get_program().get_config().get_pa_integrity_check() && !m_is_gqa_single_token) {
         extra_options += " -DPA_INTEGRITY_CHECK=1";
     }
 
@@ -1552,7 +1535,6 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
     switch (device_info.arch) {
     case gpu_arch::xe_hpg: {
         config = choose_config_xehpg(static_cast<int32_t>(k_head_size), nkeys_v, thin_q, is_quantized, is_paged_attention, is_prefill);
-        // print chosen config once for debugging
         break;
     }
     case gpu_arch::xe2:

@@ -110,3 +110,4 @@ OV_CONFIG_DEBUG_OPTION(ov::intel_gpu, dynamic_quantization_single, -1, "Apply dy
 OV_CONFIG_DEBUG_OPTION(ov::intel_gpu, network_marker, false, "Insert named OpenCL marker kernels at network execution start/finish for CLIntercept tracing")
 OV_CONFIG_DEBUG_OPTION(ov::intel_gpu, list_layers, false, "Print layers list")
 OV_CONFIG_DEBUG_OPTION(ov::intel_gpu, print_input_data_shapes, false, "print input data shapes")
+OV_CONFIG_DEBUG_OPTION(ov::intel_gpu, pa_integrity_check, false, "Enable in-kernel SDPA micro-GEMM integrity checks (per-row K^T*Q and V*S reference comparisons)")
