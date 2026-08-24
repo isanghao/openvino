@@ -1550,35 +1550,21 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
     }
     }
 
-    // read environment variable A, B, C, D and override config->wg_m_kq, config->wg_n_kq, config->wg_m_vs, config->wg_n_vs if they are set
-    const char* env_wg_m_kq = std::getenv("AA");
-    const char* env_wg_n_kq = std::getenv("BB");
-    const char* env_wg_m_vs = std::getenv("CC");
-    const char* env_wg_n_vs = std::getenv("DD");
     if (!is_prefill) {
-        if (env_wg_m_kq != nullptr) {
-            config->wg_m_kq = std::stoi(env_wg_m_kq);
-        }
-        if (env_wg_n_kq != nullptr) {
-            config->wg_n_kq = std::stoi(env_wg_n_kq);
-        }
-        if (env_wg_m_vs != nullptr) {
-            config->wg_m_vs = std::stoi(env_wg_m_vs);
-        }
-        if (env_wg_n_vs != nullptr) {
-            config->wg_n_vs = std::stoi(env_wg_n_vs);
+        const auto& wg_cfg = params.get_program().get_config().get_micro_sdpa_workgroup_config();
+        if (wg_cfg.size() >= 4) {
+            config->wg_m_kq = wg_cfg[0];
+            config->wg_n_kq = wg_cfg[1];
+            config->wg_m_vs = wg_cfg[2];
+            config->wg_n_vs = wg_cfg[3];
         }
     }
-    static bool is_first = true;
-    if (is_first && !is_prefill) {
-        GPU_DEBUG_COUT << "is_prefill=" << is_prefill << " single_token " << is_gqa_single_token << " Chosen config for xe_hpg: "
-                << config->wg_m_kq << ", "
-                << config->wg_n_kq << ", "
-                << config->wg_m_vs << ", "
-                << config->wg_n_vs << ", "
-                << std::endl;
-        is_first = false;
-    }
+    GPU_DEBUG_TRACE_DETAIL << "is_prefill=" << is_prefill << " single_token " << is_gqa_single_token << " Chosen config for xe_hpg: "
+            << config->wg_m_kq << ", "
+            << config->wg_n_kq << ", "
+            << config->wg_m_vs << ", "
+            << config->wg_n_vs << ", "
+            << std::endl;
 
     OPENVINO_ASSERT(config != nullptr);
 
