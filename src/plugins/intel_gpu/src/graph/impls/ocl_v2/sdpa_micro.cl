@@ -191,7 +191,6 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
     const uint subsequence_end = subsequence_begins[gws_mapping + 1];
     const uint subsequence_query_block_idx = block_start_pos - subsequence_begin;
     int q = subsequence_end - subsequence_begin;
-    bool is_first = true;
     #if HAS_QQ_BIAS
         const uint qq_bias_num = qq_bias_begins[gws_mapping + 1] - qq_bias_begins[gws_mapping];
         const uint cumulated_spec_num = qq_bias_begins[gws_mapping];
@@ -697,12 +696,6 @@ KERNEL(micro_sdpa)(OPTIONAL_SHAPE_INFO_ARG
          * -------------------------------------------------------------- */
 #ifdef PA_INTEGRITY_CHECK
     #if !IS_GQA_SINGLE_TOKEN
-        if (get_global_id(0) == 0 && get_global_id(1) == 0
-                && get_global_id(2) == 0 && is_first) {
-            printf("AA: sdpa_micro q %d IS_PREFILL %d IS_GQA_SINGLE_TOKEN %d\n", q, IS_PREFILL, IS_GQA_SINGLE_TOKEN);
-            is_first = false;
-        }
-
         /* We can only build a meaningful reference for KV cache layouts we
          * know how to decode here:
          *   - Uncompressed fp16 paged K (IS_KV_COMPRESSED_PA not defined), or

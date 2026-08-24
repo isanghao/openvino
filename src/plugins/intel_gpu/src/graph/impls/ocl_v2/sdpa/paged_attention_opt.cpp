@@ -11,11 +11,7 @@
 
 #include <array>
 #include <cstdint>
-#include <cstdlib>
-#include <atomic>
-#include <fstream>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include "../primitive_ocl_base.hpp"
@@ -1558,7 +1554,6 @@ public:
             else
 #endif
                 res_event = {execute_stage(res_event, instance, pa_sdpa_opt)};
-
         } else if (rt_params->stage == PagedAttentionStage::GENERATE || rt_params->stage == PagedAttentionStage::MIXED) {
             const auto multi_tokens_mode = rt_params->stage == PagedAttentionStage::MIXED;
             auto num_of_partitions = rt_params->num_of_partitions;
@@ -1575,7 +1570,6 @@ public:
             if (num_of_partitions > 1 && !rt_params->use_micro_sdpa) {
                 res_event = {execute_stage(res_event, instance, multi_tokens_mode ? pa_multi_token_finalization : pa_single_token_finalization)};
             }
-
         }
 
         if (has_scores_output) {
@@ -1777,7 +1771,6 @@ public:
             const auto indexes_buf_size = ceil_div(target_seq_len, wg_tile_q) * 2;
             internal_buffers.emplace_back(indexes_buf_size * 4, indexes_dt, lockable, not_shareable);
         }
-
 #endif
 
         // Adaptive RKV Diversity buffers (allocated when enabled, execution determined by runtime evictable_sizes)
