@@ -22,40 +22,6 @@
 namespace ov::intel_gpu::ocl {
 namespace {
 
-// Enabled by setting `OV_GPU_DUMP_SDPA_MICRO_TILE` to a directory/file prefix.
-// When set, the SDPA-micro paged !prefill kernel dumps one KQ tile per launch
-// (WG(0,0,0), sg 0, first k iter) into an extra internal buffer that
-// PagedAttentionOptImpl writes to disk for offline validation.
-inline bool sdpa_micro_dump_enabled() {
-    static const bool enabled = [] {
-        const char* p = std::getenv("OV_GPU_DUMP_SDPA_MICRO_TILE");
-        return p != nullptr && p[0] != '\0';
-    }();
-    return enabled;
-}
-
-// Fixed slot in intermediates_memories used by the dump path.
-// Kept in sync with PagedAttentionOptImpl::get_internal_buffer_descs.
-constexpr uint32_t kSdpaMicroDumpBufferIdx = 4;
-
-// When set, the SDPA-micro paged !prefill kernel replaces the ugemm-based
-// KQ path (Layout::N past-K via ugemm_kq + Layout::T new-K via ugemm_kcq)
-// with a plain OpenCL K^T*Q scalar loop. Diagnostic-only; used to isolate
-// microkernel/layout bugs by A/B-comparing against the ugemm path.
-inline bool sdpa_micro_transpose_kv_cache_enabled() {
-    static const bool enabled = [] {
-        const char* p = std::getenv("OV_GPU_SDPA_TRANSPOSE_KV_CACHE");
-        return p != nullptr && p[0] != '\0';
-    }();
-    return enabled;
-}
-
-// Fixed slot for the diagnostic KV-staging buffer used by TRANSPOSE_KV_CACHE.
-// Kept in sync with PagedAttentionOptImpl::get_internal_buffer_descs.
-inline uint32_t sdpa_micro_kv_stage_buffer_idx() {
-    return sdpa_micro_dump_enabled() ? 5 : 4;
-}
-
 // When set, the SDPA-micro kernel compiles in the in-kernel integrity checks
 // (per-row K^T*Q reference comparison, ugemm_vs reference check, layout /
 // raw C-tile dumps). Enabled by env var OV_GPU_PA_INTEGRITY_CHECK.
@@ -872,12 +838,6 @@ std::string SDPAMicroGenerator::get_build_options(const kernel_impl_params& para
     extra_options += " -Dcl_intel_global_float_atomic";
     extra_options += " -Dcl_intel_subgroup_matrix_multiply_accumulate";
     extra_options += " -Dcl_intel_subgroup_split_matrix_multiply_accumulate";
-    if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token) {
-        extra_options += " -DDUMP_UGEMM_TILE=1";
-    }
-    if (sdpa_micro_transpose_kv_cache_enabled() && !m_is_prefill && !m_is_gqa_single_token) {
-        extra_options += " -DTRANSPOSE_KV_CACHE=1";
-    }
     if (sdpa_micro_integrity_check_enabled() && !m_is_gqa_single_token) {
         extra_options += " -DPA_INTEGRITY_CHECK=1";
     }
@@ -1464,14 +1424,6 @@ Arguments SDPAMicroGenerator::get_arguments_desc(const kernel_impl_params& param
         args.push_back({ArgumentDescriptor::Types::INPUT, input_idx + 1});  // V scales
         if (is_asym_quantization)
             args.push_back({ArgumentDescriptor::Types::INPUT, input_idx + 3});  // V zp
-    }
-
-    if (sdpa_micro_dump_enabled() && !m_is_gqa_single_token && config.is_paged_attention) {
-        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, kSdpaMicroDumpBufferIdx});  // dbg_buffer
-    }
-
-    if (sdpa_micro_transpose_kv_cache_enabled() && !m_is_prefill && !m_is_gqa_single_token && config.is_paged_attention) {
-        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, sdpa_micro_kv_stage_buffer_idx()});  // K_stage
     }
 
     return args;
